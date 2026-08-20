@@ -24,8 +24,6 @@ npx playwright install chromium
 |---|---|
 | `npm test` | Run all tests in Chromium |
 | `npx playwright test --headed` | Run with the browser visible |
-| `npx playwright test login.spec.ts` | Login smoke test only |
-| `npx playwright test e2escenario1.spec.ts` | Full E2E scenario only |
 | `npx playwright test --ui` | Open the interactive Playwright UI runner |
 
 ## Reports
@@ -36,21 +34,6 @@ After a test run, open a report with:
 |---|---|---|
 | Playwright HTML | `npx playwright show-report` | `playwright-report/` |
 | Monocart | `npm run report:monocart` | `monocart-report/index.html` |
-
-## Project structure
-
-```
-pages/
-  apigw/api/        # API Gateway HTTP clients
-  wmio/api/         # webMethods.io API clients
-  wmio/ui/          # Page objects for the wmio UI (login, E2E monitoring)
-  common/ui/        # Shared page objects
-tests/
-  wmio/ui/          # UI test specs
-utils/
-  fixtures.ts       # Custom Playwright fixtures (pre-authenticated page)
-  totp.ts           # TOTP/Google Authenticator code generator
-```
 
 ## Tech stack
 
