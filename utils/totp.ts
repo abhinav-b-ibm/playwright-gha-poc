@@ -1,20 +1,15 @@
-import { authenticator } from 'otplib';
+import { generateSync, createGuardrails } from 'otplib';
+import { getRemainingTime } from '@otplib/totp';
+
+// Relax the minimum-secret-length guardrail so short (but valid) secrets
+// that work in Google Authenticator are accepted by otplib v13.
+const guardrails = createGuardrails({ MIN_SECRET_BYTES: 1 });
 
 /**
  * Generates a current Google Authenticator (TOTP) code from a base32 secret.
- *
- * How to get your secret:
- *   - When setting up 2FA, most apps show a "Can't scan?" / "manual entry" link
- *   - The secret is the alphanumeric string shown there (e.g. "JBSWY3DPEHPK3PXP")
- *   - Store it in .env as WMIO_TOTP_SECRET (never commit it)
- *
- * Usage:
- *   import { generateTOTP } from '../../utils/totp';
- *   const code = generateTOTP(process.env.WMIO_TOTP_SECRET!);
- *   await page.getByLabel('Authenticator code').fill(code);
  */
 export function generateTOTP(secret: string): string {
-  return authenticator.generate(secret);
+  return generateSync({ secret, guardrails });
 }
 
 /**
@@ -26,5 +21,5 @@ export function generateTOTP(secret: string): string {
  *   }
  */
 export function getRemainingSeconds(): number {
-  return authenticator.timeRemaining();
+  return getRemainingTime();
 }

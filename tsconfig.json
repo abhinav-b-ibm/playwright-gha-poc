@@ -1,9 +1,12 @@
 {
   "compilerOptions": {
     "target": "ESNext",
+    "lib": ["ES2020", "DOM"],
     "module": "commonjs",
     "moduleResolution": "node",
+    "ignoreDeprecations": "6.0",
     "strict": true,
+    "forceConsistentCasingInFileNames": true,
     "esModuleInterop": true,
     "types": ["node"]
   },

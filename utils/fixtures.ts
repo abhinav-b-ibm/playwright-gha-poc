@@ -20,7 +20,7 @@ export const test = base.extend<CustomFixtures>({
   loggedInPage: async ({ page }, use) => {
     const loginPage = new LoginPage(page);
     await loginPage.goto();
-    await loginPage.enterIBMid(process.env.IBM_EMAIL!);
+    await loginPage.enterIBMid(process.env.WMIO_USER!);
     await loginPage.clickContinue();
     await loginPage.selectPasskey();
     await use(page);
