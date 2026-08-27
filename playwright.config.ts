@@ -14,6 +14,7 @@ dotenv.config({ path: path.resolve(__dirname, '.env') });
  */
 export default defineConfig({
   testDir: './tests',
+  globalSetup: './global-setup.ts',
   timeout: 60000,
   /* Run tests in files in parallel */
   fullyParallel: true,
@@ -51,7 +52,7 @@ export default defineConfig({
     // baseURL: 'http://localhost:3000',
 
     /* Run in headed mode (visible browser) and close automatically after each run */
-    headless: false,
+    headless: true,
 
     /* Collect trace when retrying the failed test. See https://playwright.dev/docs/trace-viewer */
     trace: 'retain-on-failure',
