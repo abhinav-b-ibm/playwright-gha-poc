@@ -1,0 +1,15 @@
+{
+  "displayName": "{{flow_name}}",
+  "flowName": "{{flow_name}}",
+  "flowJson": "{\"cleanup\":false,\"comment\":\"\",\"label\":\"\",\"nodes\":[{\"label\":\"Flow\",\"type\":\"INVOKE\",\"node_hints\":{\"name\":null,\"itemType\":\"SERVICES\",\"serviceInfo\":{\"groupDisplayName\":\"Flow\",\"groupName\":\"flow\",\"services\":null},\"serviceName\":{\"displayName\":\"logCustomMessage\",\"serviceName\":\"pub.wmic.flow:logCustomMessage\",\"transformerSupport\":\"false\"}},\"name\":\"\",\"comment\":\"\",\"service\":\"pub.wmic.flow:logCustomMessage\"}],\"parentWsd\":\"\",\"type\":\"ROOT\",\"version\":\"1.0\"}",
+  "containsErrors": false,
+  "svc_sig": {
+    "sig_in": {},
+    "sig_out": {}
+  },
+  "gitCommitMessage": "commit made by {{commit_email}}",
+  "svc_in_validator_options": "none",
+  "svc_out_validator_options": "none",
+  "cache": false,
+  "auditoption": 2
+}
