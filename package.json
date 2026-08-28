@@ -5,6 +5,9 @@
   "main": "index.js",
   "scripts": {
     "test": "npx playwright test",
+    "test:bdd": "npx bddgen && npx playwright test --project=bdd",
+    "test:bdd:tags": "npx bddgen && npx playwright test --project=bdd --grep",
+    "bddgen": "npx bddgen",
     "report:allure": "npx allure generate allure-results --clean -o allure-report && npx allure open allure-report",
     "report:monocart": "start monocart-report/index.html"
   },
@@ -26,7 +29,8 @@
     "allure-commandline": "^2.43.0",
     "allure-playwright": "^3.0.0",
     "dotenv": "^17.4.2",
-    "monocart-reporter": "^2.0.0"
+    "monocart-reporter": "^2.0.0",
+    "playwright-bdd": "^9.2.0"
   },
   "dependencies": {
     "otplib": "^13.4.1"
