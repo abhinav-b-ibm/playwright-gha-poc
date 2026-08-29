@@ -1,6 +1,6 @@
 import { Page, expect } from '@playwright/test';
 
-export class E2EMonitoringPage {
+export class E2EMonitoringTraceVerification {
     constructor(private page: Page) {}
 
     async verifyTransaction(e2eMonURL: string, apiName: string, flowserviceName: string) {

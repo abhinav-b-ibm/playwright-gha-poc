@@ -21,7 +21,7 @@ export class WmioLoginPage {
     }
 
     // Step 1: IBMid entry screen — wait for the input to be ready before filling
-    const emailInput = this.page.locator('#email-address-input');
+    const emailInput = this.page.locator('#username');
     await emailInput.waitFor({ state: 'visible' });
     await emailInput.fill(username);
     await expect(emailInput).toHaveValue(username);

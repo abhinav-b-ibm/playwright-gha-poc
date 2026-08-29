@@ -1,6 +1,6 @@
-import { Given, When, Then, expect } from '../../utils/fixtures';
-import { ProjectPage } from '../../pages/wmio/api/ProjectPage';
-import { FlowservicePage } from '../../pages/wmio/api/FlowservicePage';
+import { Given, When, Then, expect } from '../../../utils/fixtures';
+import { ProjectPage } from '../../../pages/wmio/api/ProjectPage';
+import { FlowservicePage } from '../../../pages/wmio/api/FlowservicePage';
 import { APIResponse } from '@playwright/test';
 
 const wmioURL = process.env.WMIO_URL!;
