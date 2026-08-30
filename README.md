@@ -4,7 +4,7 @@ End-to-end test automation for IBM webMethods Hybrid Integration with Playwright
 
 ## Prerequisites
 
-- Node.js 18+
+- Node.js
 
 ## Setup
 
@@ -39,4 +39,5 @@ After a test run, open a report with:
 
 - Playwright — browser automation and test runner
 - TypeScript — type-safe test authoring
+- Gherkin
 - Monocart Reporter — rich HTML report with traces and screenshots
