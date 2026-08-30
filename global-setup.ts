@@ -1,6 +1,6 @@
 import dotenv from 'dotenv';
 import path from 'path';
-import { ensureSession } from './pages/wmio/api/WmioSession';
+import { ensureSession } from './utils/wmioSession';
 
 dotenv.config({ path: path.resolve(__dirname, '.env') });
 

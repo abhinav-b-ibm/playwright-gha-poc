@@ -1,4 +1,5 @@
-import { test as base, Page } from '@playwright/test';
+import { test as base, createBdd } from 'playwright-bdd';
+import { Page } from '@playwright/test';
 import { LoginPage } from '../pages/common/ui/LoginPage';
 
 /**
@@ -27,4 +28,5 @@ export const test = base.extend<CustomFixtures>({
   },
 });
 
+export const { Given, When, Then } = createBdd(test);
 export { expect } from '@playwright/test';

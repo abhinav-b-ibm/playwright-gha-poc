@@ -1,5 +1,5 @@
 import { APIRequestContext } from '@playwright/test';
-import { requestWithSessionRefresh } from '../../../pages/wmio/api/WmioSession';
+import { requestWithSessionRefresh } from '../../../utils/wmioSession';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -7,7 +7,7 @@ export class FlowservicePage {
     constructor(private readonly requestContext: APIRequestContext) {}
 
     async createFlowservice(wmioURL: string, projectID: string, flowserviceName: string) {
-        const raw = fs.readFileSync(path.join(__dirname, '../../../tests/data/wmio/api/create-flow-payload.json'), 'utf-8')
+        const raw = fs.readFileSync(path.join(__dirname, '../../../tests/data/wmio/create-flow-payload.json'), 'utf-8')
             .replaceAll('{{flow_name}}',    flowserviceName)
             .replaceAll('{{commit_email}}', process.env.WMIO_USER ?? 'automation@ibm.com');
         const payload = JSON.parse(raw);
