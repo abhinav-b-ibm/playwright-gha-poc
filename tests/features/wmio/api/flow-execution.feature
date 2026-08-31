@@ -1,7 +1,7 @@
 Feature: WMIO Flow Execution API
 
   @api @flowExecution
-  Scenario Outline: Create project, create flowservice, and execute it
+  Scenario Outline: Create project <projectName> and execute flowservice <flowserviceName>
     Given the project named "<projectName>" is deleted if it already exists
     And a project named "<projectName>" is created
     And a flowservice named "<flowserviceName>" is created in project "<projectName>"
