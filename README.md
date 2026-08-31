@@ -1,6 +1,6 @@
 # pivot-test-automation
 
-End-to-end test automation for IBM webMethods Hybrid Integration with Playwright and TypeScript.
+End-to-end test automation for PIVOT team with Playwright and TypeScript, Playwright-bdd, Playwright API.
 
 ## Prerequisites
 
@@ -16,11 +16,20 @@ Install dependencies and browsers:
 ```bash
 npm install
 npx playwright install chromium
+npx bddgen
 ````
 
 ## Environment variables
 
-.env file will include all the reusable parameters
+This project uses a .env file for environment-specific configuration such as URLs, usernames, passwords, and API tokens.
+
+Do not commit actual environment values or sensitive credentials to the repository.
+A template file may be committed with empty placeholder values only.
+Example:
+BASE_URL=
+
+Create your local .env file and provide the required values before execution.
+Add .env to .gitignore to prevent accidental commits of sensitive information.
 
 ## Running tests
 
@@ -28,7 +37,7 @@ npx playwright install chromium
 |---|---|
 | `npm test` | Run all tests |
 | `npm run test:bdd` | Generate BDD files and run BDD tests only |
-| `npm run test:bdd:tags -- --grep @smoke` | Run BDD tests filtered by tag (e.g. `@smoke`) |
+| `npm run test:bdd:tags -- "@smoke"` | Run BDD tests filtered by tag (e.g. `@smoke`) |
 | `npx playwright test --headed` | Run with the browser visible |
 | `npx playwright test --ui` | Open the interactive Playwright UI runner |
 
