@@ -5,5 +5,8 @@
   "cucumber.glue": [
     "step-definitions/**/*.ts",
     "utils/fixtures.ts"
+  ],
+  "cucumber.requireModule": [
+    "ts-node/register"
   ]
 }
