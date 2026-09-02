@@ -1,0 +1,12 @@
+{
+  "default": {
+    "paths": ["tests/features/**/*.feature"],
+    "require": [
+      "step-definitions/**/*.steps.ts",
+      "utils/fixtures.ts"
+    ],
+    "requireModule": ["ts-node/register"],
+    "format": ["progress"],
+    "publishQuiet": true
+  }
+}

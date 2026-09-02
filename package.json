@@ -35,6 +35,7 @@
     "typescript": "^5.8.3"
   },
   "dependencies": {
+    "cucumber": "^6.0.7",
     "otplib": "^13.4.1"
   }
 }

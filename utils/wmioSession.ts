@@ -1,135 +1,201 @@
-import { APIRequestContext, APIResponse, request } from '@playwright/test';
-import fs from 'fs';
-import path from 'path';
+/**
+ * wmioSession.ts
+ *
+ * Manages the WMIO API session used by ProjectPage and FlowservicePage.
+ * The session is acquired once (via username + password login to the WMIO
+ * REST API) and persisted to .wmio-session.json on disk.
+ * Subsequent calls to requestWithSessionRefresh() reuse the cached token,
+ * refreshing automatically when a 401 is returned.
+ *
+ * This is separate from the browser session (storageState / .auth/session.json)
+ * which is managed by auth.setup.spec.ts for UI tests.
+ */
 
-export type WmioSession = {
-    cookie: string;
-    authtoken: string;
-    csrf: string;
-};
+import { APIRequestContext, request as playwrightRequest } from '@playwright/test';
+import * as fs from 'fs';
+import * as path from 'path';
 
-const sessionPath = path.resolve(__dirname, '../.wmio-session.json');
+const SESSION_FILE = path.resolve(__dirname, '../.wmio-session.json');
 
-async function createSession(): Promise<WmioSession> {
-    const baseUrl = process.env.WMIO_URL;
-    const instanceKey = process.env.WMIO_INSTANCE_API_KEY;
+interface WmioSession {
+  cookie:    string;
+  authtoken: string;
+  csrf:      string;
+}
 
-    if (!baseUrl) throw new Error('[WmioSession] WMIO_URL is not set in .env');
-    if (!instanceKey) throw new Error('[WmioSession] WMIO_INSTANCE_API_KEY is not set in .env');
+// ── In-memory cache — avoids re-reading the file on every request ────────────
+let cached: WmioSession | null = null;
 
-    const context = await request.newContext({ baseURL: baseUrl });
-
-    try {
-        const tokenResponse = await context.get('/enterprise/v1/user/token', {
-            headers: {
-                accept: 'application/json',
-                'X-INSTANCE-API-KEY': instanceKey,
-            },
-        });
-
-        if (tokenResponse.status() !== 200) {
-            throw new Error(`[WmioSession] Token request failed — HTTP ${tokenResponse.status()}: ${await tokenResponse.text()}`);
-        }
-
-        const tokenBody = await tokenResponse.json();
-        const session = {
-            cookie: tokenBody?.output?.cookie ?? '',
-            authtoken: tokenBody?.output?.authtoken ?? '',
-            csrf: tokenBody?.output?.csrf ?? '',
-        };
-
-        fs.writeFileSync(sessionPath, JSON.stringify(session), 'utf-8');
-        return session;
-    } finally {
-        await context.dispose();
+function readSession(): WmioSession | null {
+  try {
+    if (fs.existsSync(SESSION_FILE)) {
+      const raw = fs.readFileSync(SESSION_FILE, 'utf-8');
+      return JSON.parse(raw) as WmioSession;
     }
+  } catch {
+    // corrupt file — treat as missing
+  }
+  return null;
 }
 
-export function loadSession(): WmioSession {
-    return JSON.parse(fs.readFileSync(sessionPath, 'utf-8'));
+function writeSession(session: WmioSession): void {
+  fs.writeFileSync(SESSION_FILE, JSON.stringify(session, null, 2), 'utf-8');
+  cached = session;
 }
 
-export async function ensureSession(): Promise<WmioSession> {
-    if (fs.existsSync(sessionPath)) {
-        return loadSession();
+/**
+ * Logs in to WMIO via the REST API and writes the resulting session tokens
+ * to .wmio-session.json.  Called once from global-setup.ts.
+ */
+async function login(): Promise<WmioSession> {
+  const wmioURL  = process.env.WMIO_URL!;
+  const user     = process.env.WMIO_USER!;
+  const password = process.env.WMIO_PASSWORD!;
+
+  if (!wmioURL || !user || !password) {
+    throw new Error(
+      'WMIO_URL, WMIO_USER and WMIO_PASSWORD must all be set in .env before running tests.'
+    );
+  }
+
+  console.log('[wmioSession] Logging in to acquire session tokens...');
+
+  const ctx = await playwrightRequest.newContext();
+  try {
+    const response = await ctx.post(`${wmioURL}/rest/ut/login`, {
+      headers: { 'Content-Type': 'application/json' },
+      data: { user_name: user, password },
+    });
+
+    if (!response.ok()) {
+      const body = await response.text().catch(() => '');
+      throw new Error(
+        `[wmioSession] Login failed — HTTP ${response.status()}: ${body}`
+      );
     }
 
-    return createSession();
-}
+    // Extract session cookie from Set-Cookie header
+    const setCookie = response.headers()['set-cookie'] ?? '';
+    const cookieMatch = setCookie.match(/(JSESSIONID=[^;]+(?:;[^;]*route=[^;]+)?)/i)
+      ?? setCookie.match(/(JSESSIONID=[^;\s]+)/i);
+    const cookie = cookieMatch ? cookieMatch[1] : '';
 
-export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'DELETE';
-export type AuthMode = 'session' | 'instance-key';
+    const body = await response.json();
+    const authtoken = body?.user_token ?? body?.token ?? '';
+    const csrf      = body?.csrf_token ?? response.headers()['x-csrf-token'] ?? '';
 
-function isAuthFailure(response: APIResponse, body: string): boolean {
-    if (response.status() === 401 || response.status() === 403) {
-        return true;
+    if (!authtoken) {
+      throw new Error('[wmioSession] Login succeeded but no auth token found in response.');
     }
 
-    return response.status() === 400 && body.includes('Access Denied');
+    const session: WmioSession = { cookie, authtoken, csrf };
+    writeSession(session);
+    console.log('[wmioSession] Session acquired and saved to .wmio-session.json');
+    return session;
+  } finally {
+    await ctx.dispose();
+  }
 }
 
+/**
+ * Called from global-setup.ts.
+ * If a valid session file already exists, skips the login network call.
+ * Otherwise logs in and saves the session.
+ */
+export async function ensureSession(): Promise<void> {
+  const existing = readSession();
+  if (existing?.authtoken) {
+    cached = existing;
+    console.log('[wmioSession] Reusing existing session from .wmio-session.json');
+    return;
+  }
+  await login();
+}
+
+/**
+ * Builds the Authorization / session headers for an API request.
+ * authMode:
+ *   'session'      → JSESSIONID cookie + X-Auth-Token header (WMIO internal APIs)
+ *   'instance-key' → X-INSTANCE-API-KEY header only (public-facing WMIO REST APIs)
+ */
+function buildHeaders(
+  authMode: 'session' | 'instance-key',
+  contentType: string,
+  session: WmioSession,
+): Record<string, string> {
+  const base: Record<string, string> = {
+    'Content-Type': contentType,
+    'Accept':       'application/json',
+  };
+
+  if (authMode === 'session') {
+    if (session.cookie)    base['Cookie']        = session.cookie;
+    if (session.authtoken) base['X-Auth-Token']  = session.authtoken;
+    if (session.csrf)      base['X-CSRF-Token']  = session.csrf;
+  } else {
+    const instanceKey = process.env.WMIO_INSTANCE_API_KEY!;
+    if (!instanceKey) {
+      throw new Error('WMIO_INSTANCE_API_KEY must be set in .env for instance-key auth mode.');
+    }
+    base['X-INSTANCE-API-KEY'] = instanceKey;
+  }
+
+  return base;
+}
+
+/**
+ * Executes an API request using the current session.
+ * If the server returns 401 (session expired), re-logs in once and retries.
+ *
+ * @param method       - HTTP method (GET, POST, PUT, DELETE)
+ * @param ctx          - Playwright APIRequestContext from the test fixture
+ * @param url          - Full URL to call
+ * @param data         - Request body (object or string)
+ * @param params       - Query parameters
+ * @param contentType  - Content-Type header value (default: 'application/json')
+ * @param authMode     - 'session' | 'instance-key'
+ */
 export async function requestWithSessionRefresh(
-    method: HttpMethod,
-    requestContext: APIRequestContext,
-    url: string,
-    data?: unknown,
-    params?: Record<string, string | number>,
-    contentType: 'application/json' | 'application/xml' = 'application/json',
-    authMode: AuthMode = 'session',
-): Promise<APIResponse> {
-    const contentTypeHeader = contentType === 'application/xml' ? 'application/xml; charset=UTF-8' : 'application/json';
+  method: 'GET' | 'POST' | 'PUT' | 'DELETE',
+  ctx: APIRequestContext,
+  url: string,
+  data?: unknown,
+  params?: Record<string, string>,
+  contentType = 'application/json',
+  authMode: 'session' | 'instance-key' = 'session',
+) {
+  // Ensure session is loaded
+  if (!cached) {
+    cached = readSession();
+    if (!cached?.authtoken) {
+      await login();
+      cached = readSession()!;
+    }
+  }
 
-    // --- instance-key auth: no session, no retry ---
-    if (authMode === 'instance-key') {
-        const instanceKey = process.env.WMIO_INSTANCE_API_KEY;
-        if (!instanceKey) throw new Error('[WmioSession] WMIO_INSTANCE_API_KEY is not set in .env');
-
-        return requestContext[method.toLowerCase() as 'get' | 'post' | 'put' | 'delete'](url, {
-            headers: {
-                'Content-Type': contentTypeHeader,
-                Accept: contentTypeHeader,
-                'X-INSTANCE-API-KEY': instanceKey,
-            },
-            data,
-            params,
-        });
+  const doRequest = async (session: WmioSession) => {
+    const headers = buildHeaders(authMode, contentType, session);
+    const options: Parameters<typeof ctx.get>[1] = { headers, params };
+    if (data !== undefined) {
+      (options as Record<string, unknown>)['data'] = data;
     }
 
-    // --- session auth: cookie + authtoken + csrf, with auto-refresh ---
-    let session = await ensureSession();
-
-    for (let attempt = 0; attempt < 2; attempt++) {
-        const options = {
-            headers: {
-                'Content-Type': contentTypeHeader,
-                Accept: contentTypeHeader,
-                cookie: session.cookie,
-                authtoken: session.authtoken,
-                'x-csrf-token': session.csrf,
-            },
-            data,
-            params,
-        };
-
-        const response = await requestContext[method.toLowerCase() as 'get' | 'post' | 'put' | 'delete'](url, options);
-
-        const body = await response.text();
-        if (!isAuthFailure(response, body) || attempt === 1) {
-            return response;
-        }
-
-        session = await createSession();
+    switch (method) {
+      case 'GET':    return ctx.get(url, options);
+      case 'POST':   return ctx.post(url, options);
+      case 'PUT':    return ctx.put(url, options);
+      case 'DELETE': return ctx.delete(url, options);
     }
+  };
 
-    throw new Error('[WmioSession] Unexpected retry flow');
-}
+  let response = await doRequest(cached);
 
-/** Convenience wrapper — keeps existing callers unchanged */
-export async function postWithSessionRefresh(
-    requestContext: APIRequestContext,
-    url: string,
-    data?: unknown,
-    params?: Record<string, string | number>,
-): Promise<APIResponse> {
-    return requestWithSessionRefresh('POST', requestContext, url, data, params);
+  // On 401 — session expired: re-login once and retry
+  if (response.status() === 401 && authMode === 'session') {
+    console.warn('[wmioSession] 401 received — session expired, re-logging in...');
+    cached = await login();
+    response = await doRequest(cached);
+  }
+
+  return response;
 }

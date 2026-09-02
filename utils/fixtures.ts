@@ -15,6 +15,7 @@ import { LoginPage } from '../pages/common/ui/LoginPage';
 
 type CustomFixtures = {
   loggedInPage: Page;
+  page: Page;
 };
 
 export const test = base.extend<CustomFixtures>({

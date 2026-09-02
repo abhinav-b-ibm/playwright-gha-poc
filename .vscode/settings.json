@@ -1,12 +1,19 @@
 {
+  "cucumberautocomplete.steps": [
+    "step-definitions/**/*.steps.ts",
+    "utils/fixtures.ts"
+  ],
+  "cucumberautocomplete.syncfeatures": "tests/features/**/*.feature",
+  "cucumberautocomplete.strictGherkinCompletion": false,
+  "cucumberautocomplete.strictGherkinValidation": false,
+  "cucumberautocomplete.onTypeFormat": true,
+
   "cucumber.features": [
     "tests/features/**/*.feature"
   ],
   "cucumber.glue": [
-    "step-definitions/**/*.ts",
+    "step-definitions/**/*.steps.ts",
     "utils/fixtures.ts"
   ],
-  "cucumber.requireModule": [
-    "ts-node/register"
-  ]
+  "cucumber.parameterTypes": []
 }
