@@ -7,7 +7,14 @@ import { defineBddConfig } from 'playwright-bdd';
  */
 import dotenv from 'dotenv';
 import path from 'path';
+import fs from 'fs';
 dotenv.config({ path: path.resolve(__dirname, '.env') });
+
+const SESSION_FILE = path.resolve(__dirname, 'tests/.auth/session.json');
+
+function sessionExists(): boolean {
+  return fs.existsSync(SESSION_FILE);
+}
 
 const testDir = defineBddConfig({
   features: 'tests/features/**/*.feature',
@@ -67,11 +74,26 @@ export default defineConfig({
 
   /* Configure projects for major browsers */
   projects: [
+    // ── Auth setup — run once to save the browser session ──────────────────
+    // Run manually when the session expires:
+    //   npx playwright test tests/auth.setup.spec.ts --project=auth.setup --headed
+    {
+      name: 'auth.setup',
+      testMatch: '**/auth.setup.spec.ts',
+      use: { ...devices['Desktop Chrome'] },
+    },
+
+    // ── BDD feature tests — use saved session so login is skipped ──────────
     {
       name: 'bdd',
       testDir,
-      use: { ...devices['Desktop Chrome'] },
+      use: {
+        ...devices['Desktop Chrome'],
+        storageState: sessionExists() ? SESSION_FILE : { cookies: [], origins: [] },
+      },
     },
+
+    // ── Plain Playwright spec tests ────────────────────────────────────────
     {
       name: 'chromium',
       use: { ...devices['Desktop Chrome'] },

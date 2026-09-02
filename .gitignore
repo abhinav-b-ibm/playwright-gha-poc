@@ -1,6 +1,6 @@
 ﻿
 # Environment variables
-# .env
+.env
 
 # Playwright
 node_modules/
@@ -13,3 +13,4 @@ node_modules/
 /allure-results/
 /monocart-report/
 .features-gen/
+session.json
