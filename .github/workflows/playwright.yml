@@ -84,7 +84,7 @@ concurrency:
 # ─────────────────────────────────────────────────────────────────────────────
 jobs:
   auth:
-    name: '🔐 Auth — ${{ inputs.environment || ''preprod'' }}'
+    name: '[${{ inputs.environment == ''preprod'' && ''MCSP AWS Preprod'' || inputs.environment == ''staging'' && ''MCSP AWS Staging'' || inputs.environment == ''prod'' && ''MCSP AWS Prod'' || ''MCSP AWS Preprod'' }}] 🔐 Auth'
     runs-on: self-hosted
     timeout-minutes: 15
 
@@ -159,7 +159,7 @@ jobs:
 # N runners in parallel, each runs 1/N of scenarios
 # ─────────────────────────────────────────────────────────────────────────────
   test:
-    name: '🧪 Shard ${{ matrix.shard }}/${{ inputs.shards || ''1'' }} — ${{ inputs.tag || ''@smoke'' }}'
+    name: '[${{ inputs.environment == ''preprod'' && ''MCSP AWS Preprod'' || inputs.environment == ''staging'' && ''MCSP AWS Staging'' || inputs.environment == ''prod'' && ''MCSP AWS Prod'' || ''MCSP AWS Preprod'' }}] 🧪 Shard ${{ matrix.shard }}/${{ inputs.shards || ''1'' }} — ${{ inputs.tag || ''@smoke'' }}'
     needs: auth
     runs-on: self-hosted
     timeout-minutes: 90
@@ -263,7 +263,7 @@ jobs:
 # Always runs, combines all shard blobs into one unified report
 # ─────────────────────────────────────────────────────────────────────────────
   report:
-    name: '📊 Merge Reports'
+    name: '[${{ inputs.environment == ''preprod'' && ''MCSP AWS Preprod'' || inputs.environment == ''staging'' && ''MCSP AWS Staging'' || inputs.environment == ''prod'' && ''MCSP AWS Prod'' || ''MCSP AWS Preprod'' }}] 📊 Merge Reports'
     needs: test
     runs-on: self-hosted
     timeout-minutes: 20
