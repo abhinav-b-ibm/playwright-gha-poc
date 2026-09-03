@@ -297,11 +297,14 @@ export default async function globalSetup() {
   }
 
   // ── 5. Establish apigw session (already authenticated via SSO cookie reuse) ─
-  // Since we're in the same browser context that just logged into the WMIO portal,
-  // navigating to the apigw URL will reuse the SSO session automatically.
-  // No separate login needed — just navigate and wait for the page to load.
+  // Navigate to the base APIGW URL (strip hash — page.goto aborts on hash URLs
+  // because the browser treats them as same-page navigation).
+  // The hash fragment (#/manageapi) is a SPA client-side route, not a real HTTP path.
+  const apigwBaseNoHash = APIGW_BASE.split('#')[0];
   console.log('🔐 Global setup: establishing apigw session...');
-  await page.goto(APIGW_BASE, { waitUntil: 'domcontentloaded' });
+  await page.goto(apigwBaseNoHash, { waitUntil: 'domcontentloaded' }).catch((err: Error) => {
+    console.warn(`⚠️  Global setup: apigw page.goto failed — ${err.message} — continuing`);
+  });
   await page.waitForTimeout(3000);
 
   const apigwUrl = page.url();
