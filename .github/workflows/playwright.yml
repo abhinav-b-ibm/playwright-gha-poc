@@ -227,6 +227,7 @@ jobs:
           WMIO_TOTP_SECRET:              ${{ secrets.WMIO_TOTP_SECRET }}
           WMIO_INSTANCE_API_KEY:         ${{ secrets.WMIO_INSTANCE_API_KEY }}
           APIGW_URL:                     ${{ secrets.APIGW_URL }}
+          E2EMON_URL:                    ${{ secrets.E2EMON_URL }}
           PIVOT_MANUAL_TEST_URL:         ${{ secrets.PIVOT_MANUAL_TEST_URL }}
           PIVOT_MANUAL_TEST_PROJECT_ID:  ${{ secrets.PIVOT_MANUAL_TEST_PROJECT_ID }}
 
@@ -257,6 +258,8 @@ jobs:
     needs: test
     runs-on: self-hosted
     timeout-minutes: 20
+    permissions:
+      contents: write
 
     # Always generate report even if some shards failed
     if: always()
