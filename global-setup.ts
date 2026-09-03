@@ -174,6 +174,21 @@ async function loginToPortal(
 }
 
 export default async function globalSetup() {
+  console.log('════════════════════════════════════════════');
+  console.log('🚀 global-setup.ts starting');
+  console.log(`   __dirname : ${__dirname}`);
+  console.log(`   AUTH_FILE : ${AUTH_FILE}`);
+  console.log(`   cwd       : ${process.cwd()}`);
+  console.log(`   WMIO_URL  : ${process.env.WMIO_URL ?? '(not set)'}`);
+  console.log(`   WMIO_USER : ${process.env.WMIO_USER ? '(set)' : '(NOT SET)'}`);
+  console.log(`   WMIO_PASSWORD : ${process.env.WMIO_PASSWORD ? '(set)' : '(NOT SET)'}`);
+  console.log(`   WMIO_TOTP_SECRET : ${process.env.WMIO_TOTP_SECRET ? '(set)' : '(NOT SET)'}`);
+  console.log('════════════════════════════════════════════');
+
+  // Hoisted so the catch block can close the browser if launch succeeded
+  let browser: import('@playwright/test').Browser | undefined;
+
+  try {
   // ── 1. Ensure WMIO API session (for API-level BDD steps) ──────────────────
   // Non-fatal: if WMIO_INSTANCE_API_KEY is not set or the API call fails,
   // log a warning and continue — UI tests don't need this session.
@@ -185,12 +200,17 @@ export default async function globalSetup() {
   });
 
   // ── 2. Reuse browser auth.json if still fresh ─────────────────────────────
+  // On CI: the runner workspace is fresh each run — auth.json won't exist.
+  // On local dev: reuse if less than 8 hours old.
   if (fs.existsSync(AUTH_FILE)) {
     const age = Date.now() - fs.statSync(AUTH_FILE).mtimeMs;
     if (age < MAX_AGE_MS) {
       console.log(`✅ Global setup: reusing auth.json (${Math.round(age / 60000)}m old)`);
       return;
     }
+    console.log(`ℹ️  auth.json exists but is ${Math.round(age / 60000)}m old — refreshing`);
+  } else {
+    console.log(`ℹ️  auth.json does not exist — will create fresh`);
   }
 
   const email      = process.env.WMIO_USER        ?? process.env.IBM_EMAIL!;
@@ -202,7 +222,7 @@ export default async function globalSetup() {
   if (!totpSecret) throw new Error('WMIO_TOTP_SECRET (or TOTP_SECRET) is not set in .env');
 
   const headless = process.env.HEADLESS === 'true';
-  const browser  = await chromium.launch({ headless });
+  browser  = await chromium.launch({ headless });
   const context  = await browser.newContext();
 
   // Block TrustArc/OneTrust consent banner script
@@ -248,6 +268,18 @@ export default async function globalSetup() {
   // ── 7. Save combined browser auth state ───────────────────────────────────
   await context.storageState({ path: AUTH_FILE });
   console.log('✅ Global setup: auth.json saved (WMIO + manual-test + apigw sessions)');
+  console.log(`   Saved to: ${AUTH_FILE}`);
 
   await browser.close();
+  console.log('✅ Global setup: complete');
+
+  } catch (err: any) {
+    // Print the full error so it appears clearly in GitHub Actions logs
+    console.error('❌ Global setup FAILED with error:');
+    console.error(`   ${err?.message ?? err}`);
+    if (err?.stack) console.error(err.stack);
+    // Attempt to close browser if it was opened
+    try { await browser?.close(); } catch {}
+    throw err;  // re-throw so the CI step fails
+  }
 }
