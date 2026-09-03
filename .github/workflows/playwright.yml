@@ -231,7 +231,16 @@ jobs:
           PIVOT_MANUAL_TEST_URL:         ${{ secrets.PIVOT_MANUAL_TEST_URL }}
           PIVOT_MANUAL_TEST_PROJECT_ID:  ${{ secrets.PIVOT_MANUAL_TEST_PROJECT_ID }}
 
-      # Upload allure-results so Stage 3 can generate the report
+      # Upload monocart report so Stage 3 can merge all shards
+      - name: Upload Monocart report (shard ${{ matrix.shard }})
+        uses: actions/upload-artifact@v4
+        if: always() && hashFiles('monocart-report/**') != ''
+        with:
+          name: monocart-report-shard-${{ matrix.shard }}
+          path: monocart-report/
+          retention-days: 1
+
+      # Upload allure-results so Stage 3 can generate a downloadable artifact
       - name: Upload allure results (shard ${{ matrix.shard }})
         uses: actions/upload-artifact@v4
         if: always() && hashFiles('allure-results/**') != ''
@@ -278,47 +287,38 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      # Download all shard allure-results and merge into one folder
+      # Download all shard monocart reports into separate subdirs then merge
+      - name: Download all Monocart shard reports
+        uses: actions/download-artifact@v4
+        with:
+          pattern: monocart-report-shard-*
+          path: monocart-shards/
+          merge-multiple: false
+
+      # Merge all shard reports into one unified monocart-report/
+      - name: Merge Monocart reports
+        run: |
+          npx monocart merge \
+            monocart-shards/*/index.html \
+            --name "Pivot Test Report — ${{ inputs.environment || 'preprod' }} #${{ github.run_number }}" \
+            --outputFile monocart-report/index.html
+
+      # Download all shard allure-results for a downloadable artifact
       - name: Download all allure results
         uses: actions/download-artifact@v4
+        if: always()
         with:
           pattern: allure-results-shard-*
           path: allure-results/
           merge-multiple: true
 
-      # Restore Allure history from previous runs — keeps trend charts alive
-      - name: Restore Allure history
-        uses: actions/cache@v4
-        with:
-          path: allure-report/history
-          key: allure-history-${{ inputs.environment || 'preprod' }}
-
-      # Copy history into results before generating
-      - name: Inject Allure history
-        run: cp -r allure-report/history allure-results/history 2>/dev/null || true
-
-      - name: Generate Allure report
+      - name: Generate Allure report (artifact only)
+        if: always() && hashFiles('allure-results/**') != ''
         run: npx allure generate allure-results --clean -o allure-report
-
-      # Save new history back for next run
-      - name: Save Allure history
-        uses: actions/cache@v4
-        if: always()
-        with:
-          path: allure-report/history
-          key: allure-history-${{ inputs.environment || 'preprod' }}
 
       # ── Upload all reports as downloadable artifacts ──────────────────────
 
-      - name: Upload Allure report
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: allure-report-${{ inputs.environment || 'preprod' }}-run${{ github.run_number }}
-          path: allure-report/
-          retention-days: 30
-
-      - name: Upload Monocart report
+      - name: Upload Monocart report artifact
         uses: actions/upload-artifact@v4
         if: always() && hashFiles('monocart-report/index.html') != ''
         with:
@@ -326,14 +326,22 @@ jobs:
           path: monocart-report/
           retention-days: 30
 
-      # ── Publish Allure as live URL via GitHub Pages ───────────────────────
-      # URL: https://<your-username>.github.io/<repo-name>/<environment>/
-      - name: Deploy Allure report to GitHub Pages
-        uses: peaceiris/actions-gh-pages@v4
+      - name: Upload Allure report artifact
+        uses: actions/upload-artifact@v4
         if: always() && hashFiles('allure-report/index.html') != ''
         with:
+          name: allure-report-${{ inputs.environment || 'preprod' }}-run${{ github.run_number }}
+          path: allure-report/
+          retention-days: 30
+
+      # ── Publish Monocart as live URL via GitHub Pages ─────────────────────
+      # URL: https://<owner>.github.io/<repo>/<environment>/
+      - name: Deploy Monocart report to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v4
+        if: always() && hashFiles('monocart-report/index.html') != ''
+        with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir:    ./allure-report
+          publish_dir:    ./monocart-report
           destination_dir: ${{ inputs.environment || 'preprod' }}
 
       # ── Print summary to Actions run page ────────────────────────────────
@@ -349,4 +357,4 @@ jobs:
           echo "| Suite | \`${{ inputs.suite || 'bdd' }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| Shards | \`${{ inputs.shards || '1' }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| Run | [#${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) |" >> $GITHUB_STEP_SUMMARY
-          echo "| Allure Report | [View live report](https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/${{ inputs.environment || 'preprod' }}/) |" >> $GITHUB_STEP_SUMMARY
+          echo "| Monocart Report | [View live report](https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/${{ inputs.environment || 'preprod' }}/) |" >> $GITHUB_STEP_SUMMARY
