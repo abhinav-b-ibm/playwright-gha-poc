@@ -64,12 +64,16 @@ async function loginToPortal(
     await page.waitForTimeout(500);
   }
 
-  const dashboard = page.getByRole('heading', { name: 'Projects', level: 1 });
+  // "Logged in" detection: we're back on the WMIO portal domain (not an SSO domain).
+  // Heading text varies by tenant/version — use URL instead.
+  const portalDomainPattern = new RegExp(
+    baseUrl.replace(/https?:\/\//, '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&').split('/')[0]
+  );
+  const isOnPortal = () => portalDomainPattern.test(page.url());
 
   // Already logged in?
-  const alreadyIn = await dashboard.isVisible().catch(() => false);
-  if (alreadyIn) {
-    console.log(`✅ Global setup: ${label} already authenticated`);
+  if (isOnPortal()) {
+    console.log(`✅ Global setup: ${label} already authenticated (on portal URL)`);
     return;
   }
 
@@ -107,7 +111,7 @@ async function loginToPortal(
   if (isVerify || isIamCloud) {
     // ── IBM Security Verify / IBM Cloud IAM flow ────────────────────────────
     // Both providers share the same basic structure:
-    //   email → continue → password → [OTP] → dashboard
+    //   email → continue → password → [OTP] → portal URL
     console.log(`  ↳ Detected ${isVerify ? 'IBM Security Verify' : 'IBM Cloud IAM'} SSO`);
 
     await verifyEmailField.waitFor({ state: 'visible', timeout: 20_000 });
@@ -129,16 +133,16 @@ async function loginToPortal(
     const otpField = page.locator('input[id*="otp"], input[id*="code"], input[placeholder*="code" i], input[aria-label*="code" i]').first();
     const afterPwd = await Promise.race([
       otpField.waitFor({ state: 'visible', timeout: 30_000 }).then(() => 'otp'),
-      dashboard.waitFor({ state: 'visible', timeout: 30_000 }).then(() => 'dashboard'),
+      page.waitForURL(portalDomainPattern, { timeout: 30_000 }).then(() => 'portal'),
     ]).catch(() => 'timeout');
 
     if (afterPwd === 'otp') {
       await otpField.fill(generateTOTP(totpSecret));
       const submitBtn = page.getByRole('button', { name: /submit|verify|continue/i });
       await submitBtn.click();
-      await dashboard.waitFor({ state: 'visible', timeout: 120_000 });
+      await page.waitForURL(portalDomainPattern, { timeout: 120_000 });
     } else if (afterPwd === 'timeout') {
-      console.warn(`⚠️  Global setup: ${label} — timed out waiting for OTP or dashboard after password`);
+      console.warn(`⚠️  Global setup: ${label} — timed out waiting for OTP or portal URL after password`);
     }
 
   } else {
@@ -165,16 +169,16 @@ async function loginToPortal(
     // After email submit: three possible outcomes:
     //   1. w3id Password selector appears (choose it, then fill user+pwd form)
     //   2. Password field appears directly (some tenants skip the selector)
-    //   3. Dashboard appears (already authenticated)
+    //   3. Already on portal (already authenticated — rare)
     const w3idBtn    = page.locator('#credentialSignin').or(page.getByText('w3id Password', { exact: true }));
     const pwdField   = page.locator('input[type="password"]');
     const afterEmail = await Promise.race([
       w3idBtn.waitFor({ state: 'visible',  timeout: 30_000 }).then(() => 'w3id-selector'),
       pwdField.waitFor({ state: 'visible', timeout: 30_000 }).then(() => 'password'),
-      dashboard.waitFor({ state: 'visible', timeout: 30_000 }).then(() => 'dashboard'),
+      page.waitForURL(portalDomainPattern,  { timeout: 30_000 }).then(() => 'portal'),
     ]);
 
-    if (afterEmail === 'dashboard') {
+    if (afterEmail === 'portal') {
       console.log(`✅ Global setup: ${label} already authenticated after email`);
       return;
     }
@@ -198,20 +202,26 @@ async function loginToPortal(
       .or(page.getByRole('button', { name: /log.?in|sign.?in/i }))
       .click();
 
-    // After sign-in: OTP may appear or we land directly on dashboard
+    // After sign-in: OTP may appear or we land directly on the portal
     const otpInput = page.locator('#otp-input').or(page.getByPlaceholder('One-time passcode'));
     const reached  = await Promise.race([
       otpInput.waitFor({ state: 'visible', timeout: 60_000 }).then(() => 'otp'),
-      dashboard.waitFor({ state: 'visible', timeout: 60_000 }).then(() => 'dashboard'),
+      page.waitForURL(portalDomainPattern,  { timeout: 60_000 }).then(() => 'portal'),
     ]);
     if (reached === 'otp') {
       console.log('  ↳ OTP prompt detected — submitting TOTP code');
       await otpInput.fill(generateTOTP(totpSecret));
       await page.locator('#submit_btn').or(page.getByRole('button', { name: /submit/i })).click();
-      await dashboard.waitFor({ state: 'visible', timeout: 120_000 });
+      await page.waitForURL(portalDomainPattern, { timeout: 120_000 });
     } else {
-      console.log('  ↳ No OTP prompt — landed on dashboard directly');
+      console.log('  ↳ No OTP prompt — landed on portal directly');
     }
+    // Post-login screenshot for diagnostics
+    await page.screenshot({
+      path: path.join(screenshotDir, `post-login-${label.replace(/[^a-z0-9]/gi, '_')}.png`),
+      fullPage: true
+    }).catch(() => {});
+    console.log(`  ↳ Post-login URL: ${page.url()}`);
   }
 
   console.log(`✅ Global setup: ${label} authenticated`);

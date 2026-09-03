@@ -135,10 +135,10 @@ jobs:
       # Upload SSO diagnostic screenshots (always — visible even on login failure)
       - name: Upload SSO diagnostic screenshots
         uses: actions/upload-artifact@v4
-        if: always() && hashFiles('screenshots/sso-*.png') != ''
+        if: always() && hashFiles('screenshots/*.png') != ''
         with:
           name: sso-screenshots
-          path: screenshots/sso-*.png
+          path: screenshots/*.png
           retention-days: 3
 
       # If auth.json was never created (login failed), fail loudly here
