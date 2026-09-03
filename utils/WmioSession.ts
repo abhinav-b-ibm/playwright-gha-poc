@@ -25,6 +25,7 @@ async function createSession(): Promise<WmioSession> {
                 accept: 'application/json',
                 'X-INSTANCE-API-KEY': instanceKey,
             },
+            timeout: 15_000,   // 15s — never hang indefinitely
         });
 
         if (tokenResponse.status() !== 200) {

@@ -108,7 +108,7 @@ jobs:
       # global-setup.ts: IBM w3id login + TOTP + saves auth.json
       # HEADLESS=false needed — Mac runner has a display, headed browser works fine
       - name: Run global setup (IBM SSO login)
-        run: npx ts-node --transpile-only --project tsconfig.json global-setup.ts
+        run: npx ts-node global-setup.ts
         env:
           WMIO_URL:                    ${{ secrets.WMIO_URL }}
           WMIO_USER:                   ${{ secrets.WMIO_USER }}
