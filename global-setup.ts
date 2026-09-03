@@ -175,7 +175,14 @@ async function loginToPortal(
 
 export default async function globalSetup() {
   // ── 1. Ensure WMIO API session (for API-level BDD steps) ──────────────────
-  await ensureSession();
+  // Non-fatal: if WMIO_INSTANCE_API_KEY is not set or the API call fails,
+  // log a warning and continue — UI tests don't need this session.
+  // Only @api / @flowExecution BDD tests use it.
+  await ensureSession().catch((err: Error) => {
+    console.warn(`⚠️  Global setup: ensureSession() failed — API tests will not work.`);
+    console.warn(`   Reason: ${err.message}`);
+    console.warn(`   UI tests are unaffected — continuing with browser login.`);
+  });
 
   // ── 2. Reuse browser auth.json if still fresh ─────────────────────────────
   if (fs.existsSync(AUTH_FILE)) {
@@ -215,25 +222,20 @@ export default async function globalSetup() {
     await loginToPortal(page, MANUAL_TEST_BASE, email, password, totpSecret, 'PIVOT manual-test tenant');
   }
 
-  // ── 5. Establish apigw.ipaas session (email-only SSO) ────────────────────
-  console.log('🔐 Global setup: establishing apigw.ipaas session...');
+  // ── 5. Establish apigw session (already authenticated via SSO cookie reuse) ─
+  // Since we're in the same browser context that just logged into the WMIO portal,
+  // navigating to the apigw URL will reuse the SSO session automatically.
+  // No separate login needed — just navigate and wait for the page to load.
+  console.log('🔐 Global setup: establishing apigw session...');
   await page.goto(APIGW_BASE, { waitUntil: 'domcontentloaded' });
   await page.waitForTimeout(3000);
 
-  if (!page.url().includes('apigw.ipaas')) {
-    const ibmIdField = page.locator('input[type="text"], input[type="email"]').first();
-    await ibmIdField.waitFor({ state: 'visible', timeout: 10_000 });
-    await ibmIdField.fill(email);
-    await page.getByRole('button', { name: /continue/i }).click();
-    await page.waitForURL(/apigw\.ipaas/, { timeout: 60_000 });
-    await page.waitForLoadState('domcontentloaded');
-    await page.waitForTimeout(2000);
-  }
-
-  if (page.url().includes('apigw.ipaas')) {
-    console.log('✅ Global setup: apigw.ipaas session established');
+  const apigwUrl = page.url();
+  const isOnApigw = apigwUrl.includes('apigw');
+  if (isOnApigw) {
+    console.log(`✅ Global setup: apigw session established (${apigwUrl})`);
   } else {
-    console.warn(`⚠️  Global setup: apigw.ipaas may not be authenticated — URL: ${page.url()}`);
+    console.warn(`⚠️  Global setup: apigw may not be authenticated — URL: ${apigwUrl}`);
   }
 
   // ── 6. Suppress consent banners via cookies ────────────────────────────────
