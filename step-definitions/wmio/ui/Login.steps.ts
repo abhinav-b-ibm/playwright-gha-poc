@@ -13,5 +13,7 @@ When('the user enters credentials and completes authenticator verification', asy
 });
 
 Then('the user should be logged in and redirected away from the login page', async ({ page }) => {
-  await expect(page).not.toHaveURL(process.env.WMIO_URL!, { timeout: 15000 });
+  // Verify we are on the portal domain (not on an SSO / login provider page)
+  const portalDomain = process.env.WMIO_URL!.replace(/https?:\/\//, '').split('/')[0];
+  await expect(page).toHaveURL(new RegExp(portalDomain.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), { timeout: 15000 });
 });
