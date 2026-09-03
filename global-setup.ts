@@ -136,37 +136,72 @@ async function loginToPortal(
     }
 
   } else {
-    // ── w3id / prepiam flow (original) ─────────────────────────────────────
-    await ibmIdEmailField.waitFor({ state: 'visible', timeout: 15_000 });
-    await ibmIdEmailField.fill(email);
-    await page.locator('button[type="submit"]')
-      .or(page.getByRole('button', { name: /continue/i }))
-      .click();
+    // ── w3id / prepiam flow ───────────────────────────────────────────────
+    //
+    // There are two possible states after the SSO redirect:
+    //
+    // PATH A — IBMid email-first page (prepiam standard):
+    //   URL contains /idaas/login or shows #username field
+    //   → fill email → continue → w3id selector → fill password → OTP
+    //
+    // PATH B — Direct w3id username/password form (prepiam authsvc):
+    //   URL contains /authsvc/ — IBM tenant skips the email step entirely
+    //   → fill #user-name-input directly → fill #password-input → sign in → OTP
+    //
+    const isDirectW3id = currentUrl.includes('/authsvc/') || currentUrl.includes('/sps/authsvc');
+    const w3idUserField = page.locator('#user-name-input').or(page.getByPlaceholder(/IBM email address/i));
+    const w3idPwdField  = page.locator('#password-input').or(page.getByPlaceholder(/Password/i));
 
-    const w3idBtn = page.locator('#credentialSignin').or(page.getByText('w3id Password', { exact: true }));
-    const afterEmail = await Promise.race([
-      w3idBtn.waitFor({ state: 'visible',  timeout: 30_000 }).then(() => 'w3id'),
-      dashboard.waitFor({ state: 'visible', timeout: 30_000 }).then(() => 'dashboard'),
-    ]);
-
-    if (afterEmail === 'w3id') {
-      await w3idBtn.click();
-      const userField = page.locator('#user-name-input').or(page.getByPlaceholder(/IBM email address/));
-      await userField.waitFor({ state: 'visible', timeout: 15_000 });
-      await userField.fill(email);
-      await page.locator('#password-input').or(page.getByPlaceholder(/Password/i)).fill(password);
+    if (isDirectW3id) {
+      // PATH B — already on the w3id username/password form
+      console.log('  ↳ Direct w3id form detected (authsvc) — filling credentials directly');
+      await w3idUserField.waitFor({ state: 'visible', timeout: 15_000 });
+      await w3idUserField.fill(email);
+      await w3idPwdField.fill(password);
       await page.locator('#login-button').or(page.getByRole('button', { name: /sign in/i })).click();
 
-      const otpInput = page.locator('#otp-input').or(page.getByPlaceholder('One-time passcode'));
-      const reached  = await Promise.race([
-        otpInput.waitFor({ state: 'visible', timeout: 60_000 }).then(() => 'otp'),
-        dashboard.waitFor({ state: 'visible', timeout: 60_000 }).then(() => 'dashboard'),
+    } else {
+      // PATH A — IBMid email page first
+      console.log('  ↳ IBMid email page detected — submitting email first');
+      await ibmIdEmailField.waitFor({ state: 'visible', timeout: 15_000 });
+      await ibmIdEmailField.fill(email);
+      await page.locator('button[type="submit"]')
+        .or(page.getByRole('button', { name: /continue/i }))
+        .click();
+
+      // After email: either w3id selector appears or dashboard (already logged in)
+      const w3idBtn   = page.locator('#credentialSignin').or(page.getByText('w3id Password', { exact: true }));
+      const afterEmail = await Promise.race([
+        w3idBtn.waitFor({ state: 'visible',  timeout: 30_000 }).then(() => 'w3id'),
+        dashboard.waitFor({ state: 'visible', timeout: 30_000 }).then(() => 'dashboard'),
       ]);
-      if (reached === 'otp') {
-        await otpInput.fill(generateTOTP(totpSecret));
-        await page.locator('#submit_btn').or(page.getByRole('button', { name: /submit/i })).click();
-        await dashboard.waitFor({ state: 'visible', timeout: 120_000 });
+
+      if (afterEmail === 'dashboard') {
+        console.log(`✅ Global setup: ${label} already authenticated after email`);
+        return;
       }
+
+      // Click w3id Password option → fills username/password form
+      await w3idBtn.click();
+      await w3idUserField.waitFor({ state: 'visible', timeout: 15_000 });
+      await w3idUserField.fill(email);
+      await w3idPwdField.fill(password);
+      await page.locator('#login-button').or(page.getByRole('button', { name: /sign in/i })).click();
+    }
+
+    // After sign-in: OTP may appear or we land directly on dashboard
+    const otpInput = page.locator('#otp-input').or(page.getByPlaceholder('One-time passcode'));
+    const reached  = await Promise.race([
+      otpInput.waitFor({ state: 'visible', timeout: 60_000 }).then(() => 'otp'),
+      dashboard.waitFor({ state: 'visible', timeout: 60_000 }).then(() => 'dashboard'),
+    ]);
+    if (reached === 'otp') {
+      console.log('  ↳ OTP prompt detected — submitting TOTP code');
+      await otpInput.fill(generateTOTP(totpSecret));
+      await page.locator('#submit_btn').or(page.getByRole('button', { name: /submit/i })).click();
+      await dashboard.waitFor({ state: 'visible', timeout: 120_000 });
+    } else {
+      console.log('  ↳ No OTP prompt — landed on dashboard directly');
     }
   }
 
