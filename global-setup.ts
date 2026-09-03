@@ -74,9 +74,15 @@ async function loginToPortal(
   }
 
   // ── Detect which SSO provider we landed on ────────────────────────────────
-  // Wait for either the IBMid email field (prepiam) or the
-  // IBM Security Verify sign-in page (verify.ibm.com)
-  const ibmIdEmailField  = page.locator('#username').or(page.getByPlaceholder('username@company.com'));
+  // prepiam.ice.ibmcloud.com/authsvc serves the standard IBMid email-first form
+  // (page title: "Sign in - IBM Security Verify", field label: "IBMid").
+  // verify.ibm.com / console-ibm-stg use a different input structure.
+  //
+  // Confirmed via live DOM snapshot: the field is textbox[name="IBMid"], no #username.
+  const ibmIdEmailField  = page.getByRole('textbox', { name: /ibmid/i })
+                              .or(page.getByLabel(/ibmid/i))
+                              .or(page.locator('#username'))
+                              .or(page.getByPlaceholder(/ibmid|email/i));
   const verifyEmailField = page.locator('input[id*="username"], input[name="username"], input[type="email"]').first();
 
   // Give the SSO redirect up to 20 s to settle
@@ -138,56 +144,59 @@ async function loginToPortal(
   } else {
     // ── w3id / prepiam flow ───────────────────────────────────────────────
     //
-    // There are two possible states after the SSO redirect:
+    // All prepiam tenants (including prod167095 which redirects to /authsvc/)
+    // use the IBMid email-first page — confirmed via live DOM snapshot:
+    //   textbox "IBMid" → button "Continue" → password → OTP
     //
-    // PATH A — IBMid email-first page (prepiam standard):
-    //   URL contains /idaas/login or shows #username field
-    //   → fill email → continue → w3id selector → fill password → OTP
+    // The /authsvc/ URL does NOT indicate a separate direct w3id form;
+    // it is simply the prepiam domain for the standard IBMid email-first flow.
     //
-    // PATH B — Direct w3id username/password form (prepiam authsvc):
-    //   URL contains /authsvc/ — IBM tenant skips the email step entirely
-    //   → fill #user-name-input directly → fill #password-input → sign in → OTP
-    //
-    const isDirectW3id = currentUrl.includes('/authsvc/') || currentUrl.includes('/sps/authsvc');
     const w3idUserField = page.locator('#user-name-input').or(page.getByPlaceholder(/IBM email address/i));
-    const w3idPwdField  = page.locator('#password-input').or(page.getByPlaceholder(/Password/i));
+    const w3idPwdField  = page.locator('#password-input').or(page.locator('input[type="password"]'));
 
-    if (isDirectW3id) {
-      // PATH B — already on the w3id username/password form
-      console.log('  ↳ Direct w3id form detected (authsvc) — filling credentials directly');
-      await w3idUserField.waitFor({ state: 'visible', timeout: 15_000 });
-      await w3idUserField.fill(email);
-      await w3idPwdField.fill(password);
-      await page.locator('#login-button').or(page.getByRole('button', { name: /sign in/i })).click();
+    // PATH A — IBMid email page (always the case for prepiam tenants)
+    console.log('  ↳ prepiam/w3id: IBMid email page — submitting email first');
+    await ibmIdEmailField.waitFor({ state: 'visible', timeout: 15_000 });
+    await ibmIdEmailField.fill(email);
+    await page.locator('button[type="submit"]')
+      .or(page.getByRole('button', { name: /continue/i }))
+      .click();
 
-    } else {
-      // PATH A — IBMid email page first
-      console.log('  ↳ IBMid email page detected — submitting email first');
-      await ibmIdEmailField.waitFor({ state: 'visible', timeout: 15_000 });
-      await ibmIdEmailField.fill(email);
-      await page.locator('button[type="submit"]')
-        .or(page.getByRole('button', { name: /continue/i }))
-        .click();
+    // After email submit: three possible outcomes:
+    //   1. w3id Password selector appears (choose it, then fill user+pwd form)
+    //   2. Password field appears directly (some tenants skip the selector)
+    //   3. Dashboard appears (already authenticated)
+    const w3idBtn    = page.locator('#credentialSignin').or(page.getByText('w3id Password', { exact: true }));
+    const pwdField   = page.locator('input[type="password"]');
+    const afterEmail = await Promise.race([
+      w3idBtn.waitFor({ state: 'visible',  timeout: 30_000 }).then(() => 'w3id-selector'),
+      pwdField.waitFor({ state: 'visible', timeout: 30_000 }).then(() => 'password'),
+      dashboard.waitFor({ state: 'visible', timeout: 30_000 }).then(() => 'dashboard'),
+    ]);
 
-      // After email: either w3id selector appears or dashboard (already logged in)
-      const w3idBtn   = page.locator('#credentialSignin').or(page.getByText('w3id Password', { exact: true }));
-      const afterEmail = await Promise.race([
-        w3idBtn.waitFor({ state: 'visible',  timeout: 30_000 }).then(() => 'w3id'),
-        dashboard.waitFor({ state: 'visible', timeout: 30_000 }).then(() => 'dashboard'),
-      ]);
+    if (afterEmail === 'dashboard') {
+      console.log(`✅ Global setup: ${label} already authenticated after email`);
+      return;
+    }
 
-      if (afterEmail === 'dashboard') {
-        console.log(`✅ Global setup: ${label} already authenticated after email`);
-        return;
-      }
-
-      // Click w3id Password option → fills username/password form
+    if (afterEmail === 'w3id-selector') {
+      // Click w3id Password option → shows the user+password form
+      console.log('  ↳ w3id selector detected — clicking "w3id Password"');
       await w3idBtn.click();
       await w3idUserField.waitFor({ state: 'visible', timeout: 15_000 });
       await w3idUserField.fill(email);
       await w3idPwdField.fill(password);
-      await page.locator('#login-button').or(page.getByRole('button', { name: /sign in/i })).click();
+    } else {
+      // Password field appeared directly (no selector step)
+      console.log('  ↳ Password field appeared directly (no w3id selector)');
+      await pwdField.fill(password);
     }
+
+    // "Log in" (prepiam/authsvc), "Sign In" (classic w3id), "Login" (other)
+    await page.locator('#signinbutton')
+      .or(page.locator('#login-button'))
+      .or(page.getByRole('button', { name: /log.?in|sign.?in/i }))
+      .click();
 
     // After sign-in: OTP may appear or we land directly on dashboard
     const otpInput = page.locator('#otp-input').or(page.getByPlaceholder('One-time passcode'));
