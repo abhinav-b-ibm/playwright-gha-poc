@@ -283,3 +283,14 @@ export default async function globalSetup() {
     throw err;  // re-throw so the CI step fails
   }
 }
+
+// ── Self-invoke when run directly via ts-node ─────────────────────────────
+// When Playwright runs this file as globalSetup it imports and calls the
+// default export itself. When run via `npx ts-node global-setup.ts` (CI Auth
+// stage) the default export is never called automatically — this block calls it.
+if (require.main === module) {
+  globalSetup().catch((err: Error) => {
+    console.error('❌ global-setup.ts failed:', err.message);
+    process.exit(1);
+  });
+}
