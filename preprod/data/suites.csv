@@ -1,0 +1,2 @@
+"DESCRIPTION","DURATION IN MS","NAME","PARENT SUITE","START TIME","STATUS","STOP TIME","SUB SUITE","SUITE","TEST CLASS","TEST METHOD"
+"","975","User can log in to wmio with username, password and Google Authenticator","bdd","2026-09-03","passed","2026-09-03","WMIO User Login","../.features-gen/tests/features/wmio/ui/login.feature.spec.js","",""
