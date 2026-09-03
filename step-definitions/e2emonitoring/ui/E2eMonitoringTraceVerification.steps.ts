@@ -1,4 +1,4 @@
-import { Then } from '../../../utils/fixtures';
+import { Then } from '../../../utils/Fixtures';
 import { WmioLoginPage } from '../../../pages/wmio/ui/WmioLoginPage';
 import { E2EMonitoringTraceVerification } from '../../../pages/e2emonitoring/ui/E2EMonitoringTraceVerification';
 

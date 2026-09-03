@@ -1,4 +1,4 @@
-import { When, Then } from '../../../utils/fixtures';
+import { When, Then } from '../../../utils/Fixtures';
 import { E2EMonitoringDashboard } from '../../../pages/e2emonitoring/ui/E2EMonitoringDashboard';
 
 When(

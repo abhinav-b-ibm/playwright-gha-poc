@@ -1,4 +1,4 @@
-import { When, Then, expect } from '../../../utils/fixtures';
+import { When, Then, expect } from '../../../utils/Fixtures';
 import { ApiGatewayPage } from '../../../pages/apigw/ui/ApiGatewayPage';
 
 let apiName: string;

@@ -8,10 +8,10 @@
  * Subsequent test runs load this file and skip the login flow entirely.
  *
  * Required .env vars:
- *   IBM_EMAIL    - your IBM email
- *   IBM_PASSWORD - your w3id password
+ *   WMIO_USER    - your IBM email
+ *   WMIO_PASSWORD - your w3id password
  *   TOTP_SECRET  - base32 secret from Google Authenticator
- *   WMIO_PRE_PROD_URL - portal base URL e.g. https://prod476796.a-vir-c1.int.ipaas.preprod.automation.ibm.com/
+ *   WMIO_URL - portal base URL e.g. https://prod167095.a-vir-c2.platform.ipaas.test.automation.ibm.com/
  */
 
 import { test as setup, Page } from '@playwright/test';
@@ -23,7 +23,7 @@ export const SESSION_FILE = path.resolve(__dirname, '.auth/session.json');
 // Ensure the .auth directory exists before Playwright tries to write to it
 fs.mkdirSync(path.dirname(SESSION_FILE), { recursive: true });
 
-const BASE_URL = process.env.WMIO_PRE_PROD_URL!;
+const BASE_URL = process.env.WMIO_URL!;
 
 async function snap(page: Page, label: string) {
   await page.screenshot({ path: `screenshots/auth-${label}.png`, fullPage: true });
@@ -35,12 +35,12 @@ setup('authenticate and save session', async ({ page }) => {
   // ─── login helper ──────────────────────────────────────────────────────────
 
   async function login(page: Page) {
-    const email      = process.env.IBM_EMAIL;
-    const password   = process.env.IBM_PASSWORD;
+    const email      = process.env.WMIO_USER;
+    const password   = process.env.WMIO_PASSWORD;
     const totpSecret = process.env.TOTP_SECRET;
 
-    if (!email)      throw new Error('IBM_EMAIL env var is not set');
-    if (!password)   throw new Error('IBM_PASSWORD env var is not set');
+    if (!email)      throw new Error('WMIO_USER env var is not set');
+    if (!password)   throw new Error('WMIO_PASSWORD env var is not set');
     if (!totpSecret) throw new Error('TOTP_SECRET env var is not set');
 
     await page.goto(BASE_URL, { waitUntil: 'domcontentloaded' });

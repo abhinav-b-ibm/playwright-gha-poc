@@ -7,4 +7,4 @@ Feature: API Gateway — Create and Activate API
 
     Examples:
       | flowServiceName   | serverUrl | resourcePath                                                                                                  |
-      | flowservice1check |  https://prod476796.a-vir-c1.int.ipaas.preprod.automation.ibm.com/integration/rest/external  | integration/run/development/fl90438f49018e44ae909d61ea582591c4/flowservice1 |
+      | flowservice1check |  https://prod167095.a-vir-c2.platform.ipaas.test.automation.ibm.com/integration/rest/external  | integration/run/development/fl90438f49018e44ae909d61ea582591c4/flowservice1 |

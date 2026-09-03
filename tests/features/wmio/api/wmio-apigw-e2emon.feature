@@ -7,4 +7,4 @@ Feature: E2E API Gateway and Monitoring Verification
 
     Examples:
       | apigwURL                                                                   | apiName       | apiVersion | flowserviceName | projectName | wmioURL  |
-      | http://prod476796.a-vir-s1.apigw.ipaas.preprod.automation.ibm.com/gateway/ | invokeTestAPI | 1.0        | testFlow        | Pdo_Project | WMIO_URL |
+      | http://prod167095.a-vir-c2.apigw.ipaas.test.automation.ibm.com/gateway/ | invokeTestAPI | 1.0        | testFlow        | Pdo_Project | WMIO_URL |

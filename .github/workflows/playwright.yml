@@ -1,49 +1,326 @@
-name: Playwright Tests
+name: Pivot E2E Test Cycle
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TRIGGERS
+# ─────────────────────────────────────────────────────────────────────────────
 on:
-  push:
-    branches: [ main, master ]
+  # 1. Manual trigger — tester picks product / environment / tag / shards
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment'
+        required: true
+        default: 'preprod'
+        type: choice
+        options:
+          - preprod
+          - staging
+          - prod
+
+      tag:
+        description: 'BDD tag to run'
+        required: true
+        default: '@e2e'
+        type: choice
+        options:
+          - '@e2e'
+          - '@smoke'
+          - '@ui'
+          - '@api'
+          - '@workflow'
+          - '@apigw'
+          - '@cleanup'
+          - '@monitoring'
+          - '@flowservice'
+          - '@hitApi'
+          - '@createApi'
+          - '@dashboard'
+
+      shards:
+        description: 'Number of parallel shards (1=no sharding, 5=fast, 10=fastest)'
+        required: true
+        default: '1'
+        type: choice
+        options:
+          - '1'
+          - '3'
+          - '5'
+          - '10'
+
+      suite:
+        description: 'Test suite to run'
+        required: true
+        default: 'bdd'
+        type: choice
+        options:
+          - bdd
+          - specs
+          - all
+
+  # 2. Scheduled nightly regression — preprod, @e2e, 5 shards
+  schedule:
+    - cron: '0 1 * * 1-5'   # Mon–Fri 01:00 UTC
+
+  # 3. PR smoke check — only when test files change
   pull_request:
-    branches: [ main, master ]
+    branches: [ main ]
+    paths:
+      - 'tests/**'
+      - 'pages/**'
+      - 'step-definitions/**'
+      - 'utils/**'
+      - 'helpers/**'
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PREVENT DUPLICATE RUNS — cancel queued run for same env+tag if new one starts
+# ─────────────────────────────────────────────────────────────────────────────
+concurrency:
+  group: pivot-${{ inputs.environment || 'preprod' }}-${{ inputs.tag || '@e2e' }}
+  cancel-in-progress: true
+
+# ─────────────────────────────────────────────────────────────────────────────
+# STAGE 1 — AUTH
+# One runner, one IBM SSO login, saves auth.json for all shards
+# ─────────────────────────────────────────────────────────────────────────────
 jobs:
-  test:
-    timeout-minutes: 60
-    runs-on: ubuntu-latest
+  auth:
+    name: '🔐 Auth — ${{ inputs.environment || ''preprod'' }}'
+    runs-on: self-hosted
+    timeout-minutes: 15
+
+    environment: ${{ inputs.environment || 'preprod' }}
+
     steps:
-    - uses: actions/checkout@v4
-    - uses: actions/setup-node@v4
-      with:
-        node-version: lts/*
-    - name: Install dependencies
-      run: npm ci
-    - name: Install Playwright Browsers
-      run: npx playwright install --with-deps
-    - name: Run Playwright tests
-      run: npx playwright test
+      - name: Checkout
+        uses: actions/checkout@v4
 
-    - name: Generate Allure report
-      if: always()
-      run: npx allure generate allure-results --clean -o allure-report
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: 'npm'
 
-    - name: Upload Playwright HTML report
-      uses: actions/upload-artifact@v4
-      if: always()
-      with:
-        name: playwright-report
-        path: playwright-report/
-        retention-days: 30
+      - name: Install dependencies
+        run: npm ci
 
-    - name: Upload Monocart report
-      uses: actions/upload-artifact@v4
-      if: always()
-      with:
-        name: monocart-report
-        path: monocart-report/index.html
-        retention-days: 30
+      - name: Install Playwright Chromium
+        run: npx playwright install chromium --with-deps
 
-    - name: Upload Allure report
-      uses: actions/upload-artifact@v4
-      if: always()
-      with:
-        name: allure-report
-        path: allure-report/
-        retention-days: 30
+      # global-setup.ts: IBM w3id login + TOTP + saves auth.json
+      # HEADLESS=false needed — Mac runner has a display, headed browser works fine
+      - name: Run global setup (IBM SSO login)
+        run: npx ts-node global-setup.ts
+        env:
+          WMIO_URL:                    ${{ secrets.WMIO_URL }}
+          WMIO_USER:                   ${{ secrets.WMIO_USER }}
+          WMIO_PASSWORD:               ${{ secrets.WMIO_PASSWORD }}
+          WMIO_TOTP_SECRET:            ${{ secrets.WMIO_TOTP_SECRET }}
+          WMIO_INSTANCE_API_KEY:       ${{ secrets.WMIO_INSTANCE_API_KEY }}
+          APIGW_URL:                   ${{ secrets.APIGW_URL }}
+          PIVOT_MANUAL_TEST_URL:       ${{ secrets.PIVOT_MANUAL_TEST_URL }}
+          PIVOT_MANUAL_TEST_PROJECT_ID: ${{ secrets.PIVOT_MANUAL_TEST_PROJECT_ID }}
+          HEADLESS:                    false
+
+      # Upload auth.json so all shard jobs can download and reuse it
+      - name: Upload auth state
+        uses: actions/upload-artifact@v4
+        with:
+          name: auth-state
+          path: auth.json
+          retention-days: 1
+
+# ─────────────────────────────────────────────────────────────────────────────
+# STAGE 2 — TEST SHARDS
+# N runners in parallel, each runs 1/N of scenarios
+# ─────────────────────────────────────────────────────────────────────────────
+  test:
+    name: '🧪 Shard ${{ matrix.shard }}/${{ inputs.shards || ''1'' }} — ${{ inputs.tag || ''@smoke'' }}'
+    needs: auth
+    runs-on: self-hosted
+    timeout-minutes: 90
+
+    environment: ${{ inputs.environment || 'preprod' }}
+
+    strategy:
+      # Don't cancel other shards if one fails — always get full results
+      fail-fast: false
+      matrix:
+        shard: ${{ fromJson(inputs.shards == '10' && '[1,2,3,4,5,6,7,8,9,10]' || inputs.shards == '5' && '[1,2,3,4,5]' || inputs.shards == '3' && '[1,2,3]' || '[1]') }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright Chromium
+        run: npx playwright install chromium --with-deps
+
+      # Download auth.json saved by Stage 1 — no re-login needed
+      - name: Download auth state
+        uses: actions/download-artifact@v4
+        with:
+          name: auth-state
+
+      - name: Generate BDD specs
+        run: npx bddgen
+
+      # Run the shard — suite and tag driven by workflow inputs
+      - name: Run tests (shard ${{ matrix.shard }}/${{ inputs.shards || '1' }})
+        run: |
+          SHARD_TOTAL="${{ inputs.shards || '1' }}"
+          SHARD_INDEX="${{ matrix.shard }}"
+          TAG="${{ inputs.tag || '@e2e' }}"
+          SUITE="${{ inputs.suite || 'bdd' }}"
+
+          if [ "$SUITE" = "bdd" ]; then
+            CMD="npx playwright test --project=bdd --grep \"$TAG\""
+          elif [ "$SUITE" = "specs" ]; then
+            CMD="npx playwright test --project=specs"
+          else
+            CMD="npx playwright test"
+          fi
+
+          # Add sharding only when more than 1 shard requested
+          if [ "$SHARD_TOTAL" != "1" ]; then
+            CMD="$CMD --shard=$SHARD_INDEX/$SHARD_TOTAL"
+          fi
+
+          eval $CMD
+        env:
+          CI:                            true
+          HEADLESS:                      true
+          WMIO_URL:                      ${{ secrets.WMIO_URL }}
+          WMIO_USER:                     ${{ secrets.WMIO_USER }}
+          WMIO_PASSWORD:                 ${{ secrets.WMIO_PASSWORD }}
+          WMIO_TOTP_SECRET:              ${{ secrets.WMIO_TOTP_SECRET }}
+          WMIO_INSTANCE_API_KEY:         ${{ secrets.WMIO_INSTANCE_API_KEY }}
+          APIGW_URL:                     ${{ secrets.APIGW_URL }}
+          PIVOT_MANUAL_TEST_URL:         ${{ secrets.PIVOT_MANUAL_TEST_URL }}
+          PIVOT_MANUAL_TEST_PROJECT_ID:  ${{ secrets.PIVOT_MANUAL_TEST_PROJECT_ID }}
+
+      # Upload allure-results so Stage 3 can generate the report
+      - name: Upload allure results (shard ${{ matrix.shard }})
+        uses: actions/upload-artifact@v4
+        if: always() && hashFiles('allure-results/**') != ''
+        with:
+          name: allure-results-shard-${{ matrix.shard }}
+          path: allure-results/
+          retention-days: 1
+
+      # Upload Playwright HTML report directly from shard
+      - name: Upload Playwright HTML report (shard ${{ matrix.shard }})
+        uses: actions/upload-artifact@v4
+        if: always() && hashFiles('playwright-report/**') != ''
+        with:
+          name: playwright-report-shard-${{ matrix.shard }}
+          path: playwright-report/
+          retention-days: 1
+
+# ─────────────────────────────────────────────────────────────────────────────
+# STAGE 3 — MERGE + REPORT
+# Always runs, combines all shard blobs into one unified report
+# ─────────────────────────────────────────────────────────────────────────────
+  report:
+    name: '📊 Merge Reports'
+    needs: test
+    runs-on: self-hosted
+    timeout-minutes: 20
+
+    # Always generate report even if some shards failed
+    if: always()
+
+    environment: ${{ inputs.environment || 'preprod' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Download all shard allure-results and merge into one folder
+      - name: Download all allure results
+        uses: actions/download-artifact@v4
+        with:
+          pattern: allure-results-shard-*
+          path: allure-results/
+          merge-multiple: true
+
+      # Restore Allure history from previous runs — keeps trend charts alive
+      - name: Restore Allure history
+        uses: actions/cache@v4
+        with:
+          path: allure-report/history
+          key: allure-history-${{ inputs.environment || 'preprod' }}
+
+      # Copy history into results before generating
+      - name: Inject Allure history
+        run: cp -r allure-report/history allure-results/history 2>/dev/null || true
+
+      - name: Generate Allure report
+        run: npx allure generate allure-results --clean -o allure-report
+
+      # Save new history back for next run
+      - name: Save Allure history
+        uses: actions/cache@v4
+        if: always()
+        with:
+          path: allure-report/history
+          key: allure-history-${{ inputs.environment || 'preprod' }}
+
+      # ── Upload all reports as downloadable artifacts ──────────────────────
+
+      - name: Upload Allure report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: allure-report-${{ inputs.environment || 'preprod' }}-run${{ github.run_number }}
+          path: allure-report/
+          retention-days: 30
+
+      - name: Upload Monocart report
+        uses: actions/upload-artifact@v4
+        if: always() && hashFiles('monocart-report/index.html') != ''
+        with:
+          name: monocart-report-${{ inputs.environment || 'preprod' }}-run${{ github.run_number }}
+          path: monocart-report/
+          retention-days: 30
+
+      # ── Publish Allure as live URL via GitHub Pages ───────────────────────
+      # URL: https://<your-username>.github.io/<repo-name>/<environment>/
+      - name: Deploy Allure report to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v4
+        if: always() && hashFiles('allure-report/index.html') != ''
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir:    ./allure-report
+          destination_dir: ${{ inputs.environment || 'preprod' }}
+
+      # ── Print summary to Actions run page ────────────────────────────────
+      - name: Write job summary
+        if: always()
+        run: |
+          echo "## 🧪 Test Cycle Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Field | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|---|---|" >> $GITHUB_STEP_SUMMARY
+          echo "| Environment | \`${{ inputs.environment || 'preprod' }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Tag | \`${{ inputs.tag || '@e2e' }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Suite | \`${{ inputs.suite || 'bdd' }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Shards | \`${{ inputs.shards || '1' }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Run | [#${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) |" >> $GITHUB_STEP_SUMMARY
+          echo "| Allure Report | [View live report](https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/${{ inputs.environment || 'preprod' }}/) |" >> $GITHUB_STEP_SUMMARY

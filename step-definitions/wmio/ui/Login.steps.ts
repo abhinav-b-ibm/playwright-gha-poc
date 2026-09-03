@@ -1,4 +1,4 @@
-import { Given, When, Then, expect } from '../../../utils/fixtures';
+import { Given, When, Then, expect } from '../../../utils/Fixtures';
 import { WmioLoginPage } from '../../../pages/wmio/ui/WmioLoginPage';
 
 let loginPage: WmioLoginPage;

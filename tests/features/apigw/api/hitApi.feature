@@ -7,4 +7,4 @@ Feature: API Gateway — Hit API Endpoint
 
     Examples:
       | apiPageUrl |
-      | https://prod476796.a-vir-s1.apigw.ipaas.preprod.automation.ibm.com/apigatewayui/#/api/REST:56403b87-dfa5-4a2f-8817-16fea2335b42/viewrest |
+      | https://prod167095.a-vir-c2.apigw.ipaas.test.automation.ibm.com/apigatewayui/#/api/REST:56403b87-dfa5-4a2f-8817-16fea2335b42/viewrest |

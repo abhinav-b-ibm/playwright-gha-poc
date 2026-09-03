@@ -1,5 +1,5 @@
 import { Page, expect } from '@playwright/test';
-import { generateTOTP } from '../../../utils/totp';
+import { generateTOTP } from '../../../utils/Totp';
 
 const WMIO_URL = process.env.WMIO_URL!;
 

@@ -1,4 +1,4 @@
-import { When, expect } from '../../../utils/fixtures';
+import { When, expect } from '../../../utils/Fixtures';
 import { InvokeAPIGatewayEndpoints } from '../../../pages/apigw/api/InvokeAPIGatewayEndpoint';
 import { ProjectPage } from '../../../pages/wmio/api/ProjectPage';
 

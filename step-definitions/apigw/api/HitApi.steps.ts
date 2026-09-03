@@ -1,4 +1,4 @@
-import { When, Then } from '../../../utils/fixtures';
+import { When, Then } from '../../../utils/Fixtures';
 import { HitApiPage } from '../../../pages/apigw/ui/HitApiPage';
 
 // Shared between When and Then so Then can confirm the step completed

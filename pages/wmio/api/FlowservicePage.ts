@@ -1,5 +1,5 @@
 import { APIRequestContext } from '@playwright/test';
-import { requestWithSessionRefresh } from '../../../utils/wmioSession';
+import { requestWithSessionRefresh } from '../../../utils/WmioSession';
 import * as fs from 'fs';
 import * as path from 'path';
 

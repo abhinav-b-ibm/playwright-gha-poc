@@ -1,4 +1,4 @@
-import { Given, When, Then, expect } from '../../../utils/fixtures';
+import { Given, When, Then, expect } from '../../../utils/Fixtures';
 import { ProjectPage } from '../../../pages/wmio/api/ProjectPage';
 import { FlowservicePage } from '../../../pages/wmio/api/FlowservicePage';
 import { APIResponse } from '@playwright/test';

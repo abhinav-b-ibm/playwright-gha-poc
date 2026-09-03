@@ -1,5 +1,5 @@
 import { APIRequestContext } from '@playwright/test';
-import { requestWithSessionRefresh } from '../../../utils/wmioSession';
+import { requestWithSessionRefresh } from '../../../utils/WmioSession';
 
 export class ProjectPage {
     constructor(private readonly requestContext: APIRequestContext) {}
