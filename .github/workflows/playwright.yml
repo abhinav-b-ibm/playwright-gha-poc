@@ -57,9 +57,9 @@ on:
           - specs
           - all
 
-  # 2. Scheduled nightly regression — preprod, @e2e, 5 shards
-  schedule:
-    - cron: '0 1 * * 1-5'   # Mon–Fri 01:00 UTC
+  # 2. Scheduled nightly regression — disabled for now, uncomment to re-enable
+  # schedule:
+  #   - cron: '0 1 * * 1-5'   # Mon–Fri 01:00 UTC
 
   # 3. PR smoke check — only when test files change
   pull_request:
