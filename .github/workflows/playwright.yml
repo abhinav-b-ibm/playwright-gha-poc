@@ -121,12 +121,38 @@ jobs:
           HEADLESS:                    false
 
       # Upload auth.json so all shard jobs can download and reuse it
+      # if: always() ensures this runs even when global-setup fails,
+      # so the Test stage gets a clear "artifact not found" rather than
+      # silently skipping the upload. hashFiles guard skips if file was never created.
       - name: Upload auth state
         uses: actions/upload-artifact@v4
+        if: always() && hashFiles('auth.json') != ''
         with:
           name: auth-state
           path: auth.json
           retention-days: 1
+
+      # Upload SSO diagnostic screenshots (always — visible even on login failure)
+      - name: Upload SSO diagnostic screenshots
+        uses: actions/upload-artifact@v4
+        if: always() && hashFiles('screenshots/sso-*.png') != ''
+        with:
+          name: sso-screenshots
+          path: screenshots/sso-*.png
+          retention-days: 3
+
+      # If auth.json was never created (login failed), fail loudly here
+      # so the Auth stage is marked failed and Test stage is blocked.
+      - name: Verify auth.json was created
+        if: always()
+        run: |
+          if [ ! -f auth.json ]; then
+            echo "❌ auth.json was not created — IBM SSO login failed in global-setup.ts"
+            echo "   Check the 'Run global setup' step above for the actual error."
+            echo "   Download the 'sso-screenshots' artifact to see what page was shown."
+            exit 1
+          fi
+          echo "✅ auth.json exists ($(wc -c < auth.json) bytes)"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # STAGE 2 — TEST SHARDS

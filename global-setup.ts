@@ -85,8 +85,18 @@ async function loginToPortal(
   const currentUrl = page.url();
   const isVerify   = currentUrl.includes('verify.ibm.com') || currentUrl.includes('console-ibm-stg');
   const isIamCloud = currentUrl.includes('iam.cloud.ibm.com') || currentUrl.includes('login.ibm.com');
+  // platform.ipaas.test tenant (prod167095) uses IBM w3id / prepiam SSO
+  const isPrepiam  = currentUrl.includes('prepiam') || currentUrl.includes('w3id') ||
+                     (!isVerify && !isIamCloud);   // fallthrough = treat as prepiam/w3id
 
   console.log(`  ↳ SSO redirect landed on: ${currentUrl}`);
+  console.log(`  ↳ SSO type: ${isVerify ? 'IBM Security Verify' : isIamCloud ? 'IBM Cloud IAM' : 'w3id/prepiam (default)'}`);
+
+  // Take a screenshot at this point so we can diagnose SSO failures
+  const screenshotDir = path.resolve(__dirname, 'screenshots');
+  fs.mkdirSync(screenshotDir, { recursive: true });
+  await page.screenshot({ path: path.join(screenshotDir, `sso-${label.replace(/[^a-z0-9]/gi, '_')}.png`), fullPage: true })
+    .catch(() => {});
 
   if (isVerify || isIamCloud) {
     // ── IBM Security Verify / IBM Cloud IAM flow ────────────────────────────
