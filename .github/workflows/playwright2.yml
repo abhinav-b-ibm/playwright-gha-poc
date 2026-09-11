@@ -140,21 +140,12 @@ jobs:
           retention-days: 3
 
 
-  # ============================================================
-  # TESTS
-  # ============================================================
-
+  # ─────────────────────────────────────────────────────────────────────────────
+# STAGE 2 — TEST SHARDS
+# N runners in parallel, each runs 1/N of scenarios
+# ─────────────────────────────────────────────────────────────────────────────
   test:
-
-    name: >
-      [${{
-        inputs.environment == 'preprod' && 'MCSP AWS Preprod' ||
-        inputs.environment == 'staging' && 'MCSP AWS Staging' ||
-        inputs.environment == 'prod' && 'MCSP AWS Prod' ||
-        'MCSP AWS Preprod'
-      }}]
-      Shard ${{ matrix.shard }}/${{ inputs.shards || '1' }}
-      - ${{ inputs.tag || '@e2e' }}
+    name: '[${{ inputs.environment == ''preprod'' && ''MCSP AWS Preprod'' || inputs.environment == ''staging'' && ''MCSP AWS Staging'' || inputs.environment == ''prod'' && ''MCSP AWS Prod'' || ''MCSP AWS Preprod'' }}] 🧪 Shard ${{ matrix.shard }}/${{ inputs.shards || ''1'' }} — ${{ inputs.tag || ''@smoke'' }}'
 
     needs: auth
 
@@ -162,57 +153,107 @@ jobs:
 
     timeout-minutes: 90
 
-    strategy:
-      fail-fast: false
-      matrix:
-        shard: [1]
-
     environment: ${{ inputs.environment || 'preprod' }}
+
+    strategy:
+      /*
+       * Don't cancel other shards if one fails.
+       * We want the complete result from every shard.
+       */
+      fail-fast: false
+
+      matrix:
+        shard: ${{ fromJson(
+          inputs.shards == '10'
+            && '[1,2,3,4,5,6,7,8,9,10]'
+            || inputs.shards == '5'
+            && '[1,2,3,4,5]'
+            || inputs.shards == '3'
+            && '[1,2,3]'
+            || '[1]'
+        ) }}
 
     steps:
 
+      # ───────────────────────────────────────────────────────────────────────
+      # CHECKOUT
+      # ───────────────────────────────────────────────────────────────────────
       - name: Checkout
         uses: actions/checkout@v4
 
+
+      # ───────────────────────────────────────────────────────────────────────
+      # NODE
+      # ───────────────────────────────────────────────────────────────────────
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: '22'
 
+
+      # ───────────────────────────────────────────────────────────────────────
+      # DEPENDENCIES
+      # ───────────────────────────────────────────────────────────────────────
       - name: Install dependencies
         run: npm install
 
+
+      # ───────────────────────────────────────────────────────────────────────
+      # PLAYWRIGHT
+      #
+      # IMPORTANT:
+      # Do NOT use --with-deps on this self-hosted runner.
+      #
+      # The runner previously failed because Playwright attempted sudo
+      # and the runner cannot provide a sudo password interactively.
+      # ───────────────────────────────────────────────────────────────────────
       - name: Install Playwright Chromium
         run: npx playwright install chromium
 
-      - name: Verify Playwright installation
-        run: npx playwright --version
 
+      # ───────────────────────────────────────────────────────────────────────
+      # AUTH STATE
+      #
+      # Stage 1 already authenticated with IBM SSO and created auth.json.
+      # Every test shard downloads that exact same auth state.
+      # No login is performed again in Stage 2.
+      # ───────────────────────────────────────────────────────────────────────
       - name: Download auth state
         uses: actions/download-artifact@v4
         with:
           name: auth-state
 
+
+      # ───────────────────────────────────────────────────────────────────────
+      # VERIFY AUTH STATE
+      # ───────────────────────────────────────────────────────────────────────
       - name: Verify auth state
         shell: bash
         run: |
           if [ ! -f auth.json ]; then
-            echo "ERROR: auth.json is missing."
-            echo "The authentication stage should have produced this file."
+            echo "ERROR: auth.json was not downloaded."
+            echo "The authentication stage should have produced auth.json."
             exit 1
           fi
 
           echo "Auth state available."
           echo "Size: $(wc -c < auth.json) bytes"
 
+
+      # ───────────────────────────────────────────────────────────────────────
+      # GENERATE BDD
+      # ───────────────────────────────────────────────────────────────────────
       - name: Generate BDD specs
         run: npx bddgen
 
-      - name: Run tests
-        id: tests
+
+      # ───────────────────────────────────────────────────────────────────────
+      # RUN TESTS
+      # ───────────────────────────────────────────────────────────────────────
+      - name: Run tests (shard ${{ matrix.shard }}/${{ inputs.shards || '1' }})
         shell: bash
         run: |
-          set +e
+          set -e
 
           SHARD_TOTAL="${{ inputs.shards || '1' }}"
           SHARD_INDEX="${{ matrix.shard }}"
@@ -227,62 +268,46 @@ jobs:
           echo "Tag         : $TAG"
           echo "Shard       : $SHARD_INDEX/$SHARD_TOTAL"
           echo "=========================================="
-
-          TEST_EXIT_CODE=0
+          echo ""
 
           if [ "$SUITE" = "bdd" ]; then
 
             if [ "$SHARD_TOTAL" = "1" ]; then
-
               npx playwright test \
                 --project=bdd \
                 --grep="$TAG"
-
             else
-
               npx playwright test \
                 --project=bdd \
                 --grep="$TAG" \
                 --shard="$SHARD_INDEX/$SHARD_TOTAL"
-
             fi
-
-            TEST_EXIT_CODE=$?
 
           elif [ "$SUITE" = "specs" ]; then
 
             if [ "$SHARD_TOTAL" = "1" ]; then
-
               npx playwright test \
                 --project=chromium
-
             else
-
               npx playwright test \
                 --project=chromium \
                 --shard="$SHARD_INDEX/$SHARD_TOTAL"
-
             fi
-
-            TEST_EXIT_CODE=$?
 
           elif [ "$SUITE" = "all" ]; then
 
             echo "Running BDD tests..."
+            echo ""
 
             if [ "$SHARD_TOTAL" = "1" ]; then
-
               npx playwright test \
                 --project=bdd \
                 --grep="$TAG"
-
             else
-
               npx playwright test \
                 --project=bdd \
                 --grep="$TAG" \
                 --shard="$SHARD_INDEX/$SHARD_TOTAL"
-
             fi
 
             BDD_EXIT=$?
@@ -291,18 +316,15 @@ jobs:
             echo "BDD exit code: $BDD_EXIT"
             echo ""
             echo "Running Playwright spec tests..."
+            echo ""
 
             if [ "$SHARD_TOTAL" = "1" ]; then
-
               npx playwright test \
                 --project=chromium
-
             else
-
               npx playwright test \
                 --project=chromium \
                 --shard="$SHARD_INDEX/$SHARD_TOTAL"
-
             fi
 
             SPECS_EXIT=$?
@@ -311,53 +333,23 @@ jobs:
             echo "Spec exit code: $SPECS_EXIT"
 
             if [ "$BDD_EXIT" -ne 0 ]; then
-              TEST_EXIT_CODE="$BDD_EXIT"
-            else
-              TEST_EXIT_CODE="$SPECS_EXIT"
+              exit "$BDD_EXIT"
+            fi
+
+            if [ "$SPECS_EXIT" -ne 0 ]; then
+              exit "$SPECS_EXIT"
             fi
 
           else
 
             echo "ERROR: Unknown suite: $SUITE"
-            TEST_EXIT_CODE=1
+            exit 1
 
           fi
 
-          echo "test_exit_code=$TEST_EXIT_CODE" >> "$GITHUB_OUTPUT"
-
-          echo ""
-          echo "=========================================="
-
-          if [ "$TEST_EXIT_CODE" -eq 0 ]; then
-            echo "Tests passed."
-          else
-            echo "Tests failed with exit code $TEST_EXIT_CODE."
-          fi
-
-          echo "=========================================="
-
-          exit 0
-
-        env:
-          CI: true
-          HEADLESS: true
-
-          WMIO_URL: ${{ secrets.WMIO_URL }}
-          WMIO_USER: ${{ secrets.WMIO_USER }}
-          WMIO_PASSWORD: ${{ secrets.WMIO_PASSWORD }}
-          WMIO_TOTP_SECRET: ${{ secrets.WMIO_TOTP_SECRET }}
-          WMIO_INSTANCE_API_KEY: ${{ secrets.WMIO_INSTANCE_API_KEY }}
-
-          APIGW_URL: ${{ secrets.APIGW_URL }}
-          E2EMON_URL: ${{ secrets.E2EMON_URL }}
-
-          PIVOT_MANUAL_TEST_URL: ${{ secrets.PIVOT_MANUAL_TEST_URL }}
-          PIVOT_MANUAL_TEST_PROJECT_ID: ${{ secrets.PIVOT_MANUAL_TEST_PROJECT_ID }}
-
-      # --------------------------------------------------------
-      # Diagnostics
-      # --------------------------------------------------------
-
+      # ───────────────────────────────────────────────────────────────────────
+      # MONOCART
+      # ───────────────────────────────────────────────────────────────────────
       - name: Inspect Monocart output
         if: always()
         shell: bash
@@ -374,48 +366,38 @@ jobs:
 
           echo "=========================================="
 
-      - name: Upload Monocart report
-        if: always() && hashFiles('monocart-report/**') != ''
+
+      - name: Upload Monocart report (shard ${{ matrix.shard }})
         uses: actions/upload-artifact@v4
+        if: always() && hashFiles('monocart-report/**') != ''
         with:
           name: monocart-report-shard-${{ matrix.shard }}
           path: monocart-report/
           retention-days: 1
 
-      - name: Upload test results
-        if: always() && hashFiles('test-results/**') != ''
+
+      # ───────────────────────────────────────────────────────────────────────
+      # TEST RESULTS
+      # ───────────────────────────────────────────────────────────────────────
+      - name: Upload test results (shard ${{ matrix.shard }})
         uses: actions/upload-artifact@v4
+        if: always() && hashFiles('test-results/**') != ''
         with:
           name: test-results-shard-${{ matrix.shard }}
           path: test-results/
           retention-days: 7
 
-      - name: Upload Playwright report
-        if: always() && hashFiles('playwright-report/**') != ''
+
+      # ───────────────────────────────────────────────────────────────────────
+      # PLAYWRIGHT HTML REPORT
+      # ───────────────────────────────────────────────────────────────────────
+      - name: Upload Playwright HTML report (shard ${{ matrix.shard }})
         uses: actions/upload-artifact@v4
+        if: always() && hashFiles('playwright-report/**') != ''
         with:
           name: playwright-report-shard-${{ matrix.shard }}
           path: playwright-report/
           retention-days: 7
-
-      - name: Fail shard if tests failed
-        if: always()
-        shell: bash
-        run: |
-          TEST_EXIT_CODE="${{ steps.tests.outputs.test_exit_code }}"
-
-          if [ -z "$TEST_EXIT_CODE" ]; then
-            echo "ERROR: Test execution did not produce an exit code."
-            exit 1
-          fi
-
-          if [ "$TEST_EXIT_CODE" -ne 0 ]; then
-            echo "Tests failed with exit code $TEST_EXIT_CODE."
-            exit "$TEST_EXIT_CODE"
-          fi
-
-          echo "Shard passed."
-
 
   # ============================================================
   # REPORT
