@@ -100,7 +100,7 @@ jobs:
           node-version: '22'   # Node 22 LTS — Node 20 deprecated on GHA runners
 
       - name: Install dependencies
-        run: npm ci
+        run: npm install
 
       - name: Install Playwright Chromium
         run: npx playwright install chromium --with-deps
@@ -182,7 +182,7 @@ jobs:
           node-version: '22'
 
       - name: Install dependencies
-        run: npm ci
+        run: npm install
 
       - name: Install Playwright Chromium
         run: npx playwright install chromium --with-deps
@@ -285,7 +285,7 @@ jobs:
           node-version: '22'
 
       - name: Install dependencies
-        run: npm ci
+        run: npm install
 
       # Download all shard monocart reports into separate subdirs then merge
       - name: Download all Monocart shard reports
