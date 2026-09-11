@@ -9,13 +9,20 @@ dotenv.config({
   path: path.resolve(__dirname, '.env'),
 });
 
-const SESSION_FILE = path.resolve(
-  __dirname,
-  'tests/.auth/session.json',
-);
+/**
+ * Stage 1 authentication creates:
+ *
+ *   auth.json
+ *
+ * GitHub Actions Stage 2 downloads that same file into the
+ * repository root before running the tests.
+ *
+ * Local runs can also use the same file when it exists.
+ */
+const AUTH_FILE = path.resolve(__dirname, 'auth.json');
 
-function sessionExists(): boolean {
-  return fs.existsSync(SESSION_FILE);
+function authFileExists(): boolean {
+  return fs.existsSync(AUTH_FILE);
 }
 
 const testDir = defineBddConfig({
@@ -30,13 +37,16 @@ export default defineConfig({
   testDir: './tests',
 
   /*
-   * Authentication is handled explicitly by the GitHub Actions
-   * authentication job:
+   * Authentication is handled explicitly by GitHub Actions:
    *
    *   npx ts-node global-setup.ts
    *
-   * Do not configure globalSetup here as well.
-   * Otherwise authentication can execute twice in CI.
+   * Stage 1 creates auth.json.
+   * Stage 2 downloads auth.json and the BDD project uses it
+   * as its Playwright storageState.
+   *
+   * Do NOT configure globalSetup here as well.
+   * Otherwise authentication could execute twice in CI.
    */
 
   timeout: 600_000,
@@ -65,11 +75,8 @@ export default defineConfig({
         outputFile: 'monocart-report/index.html',
 
         /*
-         * Required for CI shard merging.
-         *
          * Each shard produces index.json.
-         * The report job merges those JSON files
-         * into one final index.html.
+         * The report job merges those JSON files.
          */
         json: true,
       },
@@ -82,10 +89,7 @@ export default defineConfig({
 
   use: {
     /*
-     * CI and local runs use headless mode.
-     *
-     * The authentication job explicitly sets HEADLESS=false
-     * when running global-setup.ts.
+     * Tests run headless in CI.
      */
     headless: true,
 
@@ -109,17 +113,10 @@ export default defineConfig({
 
     /*
      * ----------------------------------------------------------
-     * AUTH SETUP PROJECT
+     * AUTH SETUP
      * ----------------------------------------------------------
      *
      * Kept available for local/manual authentication setup.
-     *
-     * Example:
-     *
-     * npx playwright test \
-     *   tests/auth.setup.spec.ts \
-     *   --project=auth.setup \
-     *   --headed
      */
     {
       name: 'auth.setup',
@@ -133,11 +130,15 @@ export default defineConfig({
 
     /*
      * ----------------------------------------------------------
-     * BDD TESTS
+     * BDD
      * ----------------------------------------------------------
      *
-     * BDD feature files use the saved browser session when it
-     * exists.
+     * IMPORTANT:
+     *
+     * Stage 1 creates auth.json.
+     * Stage 2 downloads auth.json.
+     *
+     * Therefore BDD must use auth.json here.
      */
     {
       name: 'bdd',
@@ -147,8 +148,8 @@ export default defineConfig({
       use: {
         ...devices['Desktop Chrome'],
 
-        storageState: sessionExists()
-          ? SESSION_FILE
+        storageState: authFileExists()
+          ? AUTH_FILE
           : {
               cookies: [],
               origins: [],
@@ -160,10 +161,6 @@ export default defineConfig({
      * ----------------------------------------------------------
      * NORMAL PLAYWRIGHT TESTS
      * ----------------------------------------------------------
-     *
-     * The GitHub Actions "specs" option maps to this project.
-     *
-     * There is intentionally no project named "specs".
      */
     {
       name: 'chromium',
