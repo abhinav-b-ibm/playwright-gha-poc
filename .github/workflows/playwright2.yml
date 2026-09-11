@@ -53,16 +53,6 @@ on:
           - specs
           - all
 
-  pull_request:
-    branches:
-      - main
-    paths:
-      - "tests/**"
-      - "pages/**"
-      - "step-definitions/**"
-      - "utils/**"
-      - "helpers/**"
-
 concurrency:
   group: pivot-${{ inputs.environment || 'preprod' }}-${{ inputs.tag || '@e2e' }}
   cancel-in-progress: true
@@ -70,7 +60,7 @@ concurrency:
 jobs:
 
   # ============================================================
-  # AUTH
+  # AUTHENTICATION
   # ============================================================
 
   auth:
@@ -84,7 +74,6 @@ jobs:
       }}] Auth
 
     runs-on: self-hosted
-
     timeout-minutes: 15
 
     environment: ${{ inputs.environment || 'preprod' }}
@@ -102,18 +91,12 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      # IMPORTANT:
-      # Do NOT use --with-deps on the current self-hosted runner.
-      # It attempts sudo and requires an interactive password.
       - name: Install Playwright Chromium
         run: npx playwright install chromium
 
       - name: Verify Playwright installation
         run: npx playwright --version
 
-      # Authentication is done explicitly here.
-      # Playwright globalSetup is disabled in playwright.config.ts
-      # so authentication is NOT performed twice.
       - name: Run IBM SSO authentication
         run: npx ts-node global-setup.ts
         env:
@@ -122,36 +105,14 @@ jobs:
           WMIO_PASSWORD: ${{ secrets.WMIO_PASSWORD }}
           WMIO_TOTP_SECRET: ${{ secrets.WMIO_TOTP_SECRET }}
           WMIO_INSTANCE_API_KEY: ${{ secrets.WMIO_INSTANCE_API_KEY }}
-
           APIGW_URL: ${{ secrets.APIGW_URL }}
-
           PIVOT_MANUAL_TEST_URL: ${{ secrets.PIVOT_MANUAL_TEST_URL }}
           PIVOT_MANUAL_TEST_PROJECT_ID: ${{ secrets.PIVOT_MANUAL_TEST_PROJECT_ID }}
-
           HEADLESS: false
 
-      # Diagnostic only.
-      # If authentication failed, this step does not create another failure.
-      - name: Upload auth state
-        if: always() && hashFiles("auth.json") != ""
-        uses: actions/upload-artifact@v4
-        with:
-          name: auth-state
-          path: auth.json
-          retention-days: 1
-
-      # Diagnostic only.
-      - name: Upload SSO screenshots
-        if: always() && hashFiles("screenshots/*.png") != ""
-        uses: actions/upload-artifact@v4
-        with:
-          name: sso-screenshots
-          path: screenshots/*.png
-          retention-days: 3
-
-      # Only validate auth.json if the SSO command itself succeeded.
       - name: Verify auth state
         if: success()
+        shell: bash
         run: |
           if [ ! -f auth.json ]; then
             echo "ERROR: IBM SSO completed but auth.json was not created."
@@ -161,6 +122,22 @@ jobs:
 
           echo "Auth state created successfully."
           echo "Size: $(wc -c < auth.json) bytes"
+
+      - name: Upload auth state
+        if: always() && hashFiles('auth.json') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: auth-state
+          path: auth.json
+          retention-days: 1
+
+      - name: Upload SSO screenshots
+        if: always() && hashFiles('screenshots/*.png') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: sso-screenshots
+          path: screenshots/*.png
+          retention-days: 3
 
 
   # ============================================================
@@ -187,14 +164,8 @@ jobs:
 
     strategy:
       fail-fast: false
-
       matrix:
-        shard: ${{ fromJson(
-          inputs.shards == '10' && '[1,2,3,4,5,6,7,8,9,10]' ||
-          inputs.shards == '5' && '[1,2,3,4,5]' ||
-          inputs.shards == '3' && '[1,2,3]' ||
-          '[1]'
-        ) }}
+        shard: [1]
 
     environment: ${{ inputs.environment || 'preprod' }}
 
@@ -223,6 +194,7 @@ jobs:
           name: auth-state
 
       - name: Verify auth state
+        shell: bash
         run: |
           if [ ! -f auth.json ]; then
             echo "ERROR: auth.json is missing."
@@ -256,49 +228,53 @@ jobs:
           echo "Shard       : $SHARD_INDEX/$SHARD_TOTAL"
           echo "=========================================="
 
+          TEST_EXIT_CODE=0
+
           if [ "$SUITE" = "bdd" ]; then
 
             if [ "$SHARD_TOTAL" = "1" ]; then
+
               npx playwright test \
                 --project=bdd \
                 --grep="$TAG"
+
             else
+
               npx playwright test \
                 --project=bdd \
                 --grep="$TAG" \
                 --shard="$SHARD_INDEX/$SHARD_TOTAL"
+
             fi
+
+            TEST_EXIT_CODE=$?
 
           elif [ "$SUITE" = "specs" ]; then
 
             if [ "$SHARD_TOTAL" = "1" ]; then
+
               npx playwright test \
                 --project=chromium
+
             else
+
               npx playwright test \
                 --project=chromium \
                 --shard="$SHARD_INDEX/$SHARD_TOTAL"
+
             fi
+
+            TEST_EXIT_CODE=$?
 
           elif [ "$SUITE" = "all" ]; then
 
+            echo "Running BDD tests..."
+
             if [ "$SHARD_TOTAL" = "1" ]; then
+
               npx playwright test \
                 --project=bdd \
                 --grep="$TAG"
-
-              BDD_EXIT=$?
-
-              npx playwright test \
-                --project=chromium
-
-              SPECS_EXIT=$?
-
-              if [ "$BDD_EXIT" -ne 0 ]; then
-                TEST_EXIT_CODE="$BDD_EXIT"
-              else
-                TEST_EXIT_CODE="$SPECS_EXIT"
-              fi
 
             else
 
@@ -307,29 +283,44 @@ jobs:
                 --grep="$TAG" \
                 --shard="$SHARD_INDEX/$SHARD_TOTAL"
 
-              BDD_EXIT=$?
+            fi
+
+            BDD_EXIT=$?
+
+            echo ""
+            echo "BDD exit code: $BDD_EXIT"
+            echo ""
+            echo "Running Playwright spec tests..."
+
+            if [ "$SHARD_TOTAL" = "1" ]; then
+
+              npx playwright test \
+                --project=chromium
+
+            else
 
               npx playwright test \
                 --project=chromium \
                 --shard="$SHARD_INDEX/$SHARD_TOTAL"
 
-              SPECS_EXIT=$?
+            fi
 
-              if [ "$BDD_EXIT" -ne 0 ]; then
-                TEST_EXIT_CODE="$BDD_EXIT"
-              else
-                TEST_EXIT_CODE="$SPECS_EXIT"
-              fi
+            SPECS_EXIT=$?
 
+            echo ""
+            echo "Spec exit code: $SPECS_EXIT"
+
+            if [ "$BDD_EXIT" -ne 0 ]; then
+              TEST_EXIT_CODE="$BDD_EXIT"
+            else
+              TEST_EXIT_CODE="$SPECS_EXIT"
             fi
 
           else
+
             echo "ERROR: Unknown suite: $SUITE"
             TEST_EXIT_CODE=1
-          fi
 
-          if [ -z "${TEST_EXIT_CODE:-}" ]; then
-            TEST_EXIT_CODE=$?
           fi
 
           echo "test_exit_code=$TEST_EXIT_CODE" >> "$GITHUB_OUTPUT"
@@ -345,8 +336,6 @@ jobs:
 
           echo "=========================================="
 
-          # Do not fail yet.
-          # Reports and diagnostics must be uploaded first.
           exit 0
 
         env:
@@ -365,10 +354,13 @@ jobs:
           PIVOT_MANUAL_TEST_URL: ${{ secrets.PIVOT_MANUAL_TEST_URL }}
           PIVOT_MANUAL_TEST_PROJECT_ID: ${{ secrets.PIVOT_MANUAL_TEST_PROJECT_ID }}
 
-      # Diagnostic/artifact steps may run after test failure.
-      # They do NOT represent new test failures.
+      # --------------------------------------------------------
+      # Diagnostics
+      # --------------------------------------------------------
+
       - name: Inspect Monocart output
         if: always()
+        shell: bash
         run: |
           echo "=========================================="
           echo "Monocart output"
@@ -383,7 +375,7 @@ jobs:
           echo "=========================================="
 
       - name: Upload Monocart report
-        if: always() && hashFiles("monocart-report/**") != ""
+        if: always() && hashFiles('monocart-report/**') != ''
         uses: actions/upload-artifact@v4
         with:
           name: monocart-report-shard-${{ matrix.shard }}
@@ -391,7 +383,7 @@ jobs:
           retention-days: 1
 
       - name: Upload test results
-        if: always() && hashFiles("test-results/**") != ""
+        if: always() && hashFiles('test-results/**') != ''
         uses: actions/upload-artifact@v4
         with:
           name: test-results-shard-${{ matrix.shard }}
@@ -399,7 +391,7 @@ jobs:
           retention-days: 7
 
       - name: Upload Playwright report
-        if: always() && hashFiles("playwright-report/**") != ""
+        if: always() && hashFiles('playwright-report/**') != ''
         uses: actions/upload-artifact@v4
         with:
           name: playwright-report-shard-${{ matrix.shard }}
@@ -445,8 +437,6 @@ jobs:
 
     timeout-minutes: 20
 
-    # Run report generation only when the test matrix actually ran.
-    # If auth failed, the test job is skipped and this job is skipped too.
     if: >
       always() &&
       (
@@ -481,6 +471,7 @@ jobs:
 
       - name: Inspect downloaded Monocart reports
         if: always()
+        shell: bash
         run: |
           echo "=========================================="
           echo "Downloaded Monocart files"
@@ -517,8 +508,11 @@ jobs:
             echo "Downloaded files:"
             find monocart-shards -type f -print | sort || true
             echo ""
-            echo "Verify that playwright.config.ts has json: true"
-            echo "in the monocart-reporter configuration."
+            echo "Verify that playwright.config.ts has:"
+            echo ""
+            echo "  json: true"
+            echo ""
+            echo "inside the monocart-reporter configuration."
             exit 1
           fi
 
@@ -533,6 +527,7 @@ jobs:
             --outputFile monocart-report/index.html
 
       - name: Verify Monocart report
+        shell: bash
         run: |
           if [ ! -f monocart-report/index.html ]; then
             echo "ERROR: Monocart report was not generated."
@@ -543,7 +538,7 @@ jobs:
           echo "Size: $(wc -c < monocart-report/index.html) bytes"
 
       - name: Upload final Monocart report
-        if: always() && hashFiles("monocart-report/**") != ""
+        if: always() && hashFiles('monocart-report/**') != ''
         uses: actions/upload-artifact@v4
         with:
           name: monocart-report-${{ inputs.environment || 'preprod' }}-run${{ github.run_number }}
@@ -551,7 +546,7 @@ jobs:
           retention-days: 30
 
       - name: Deploy Monocart report to GitHub Pages
-        if: success() && hashFiles("monocart-report/index.html") != ""
+        if: success() && hashFiles('monocart-report/index.html') != ''
         uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
@@ -560,10 +555,10 @@ jobs:
 
       - name: Write job summary
         if: always()
+        shell: bash
         run: |
           echo "## Pivot E2E Test Cycle" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
-
           echo "| Field | Value |" >> "$GITHUB_STEP_SUMMARY"
           echo "|---|---|" >> "$GITHUB_STEP_SUMMARY"
           echo "| Environment | \`${{ inputs.environment || 'preprod' }}\` |" >> "$GITHUB_STEP_SUMMARY"
