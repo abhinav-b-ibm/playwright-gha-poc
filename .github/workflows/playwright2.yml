@@ -74,6 +74,7 @@ jobs:
       }}] Auth
 
     runs-on: self-hosted
+
     timeout-minutes: 15
 
     environment: ${{ inputs.environment || 'preprod' }}
@@ -97,6 +98,47 @@ jobs:
       - name: Verify Playwright installation
         run: npx playwright --version
 
+      - name: Verify authentication environment
+        shell: bash
+        env:
+          WMIO_URL: ${{ secrets.WMIO_URL }}
+          WMIO_USER: ${{ secrets.WMIO_USER }}
+          WMIO_PASSWORD: ${{ secrets.WMIO_PASSWORD }}
+          WMIO_TOTP_SECRET: ${{ secrets.WMIO_TOTP_SECRET }}
+        run: |
+          set -e
+
+          echo "=========================================="
+          echo "Authentication environment validation"
+          echo "=========================================="
+          echo "Environment: ${{ inputs.environment || 'preprod' }}"
+
+          if [ -z "${WMIO_URL:-}" ]; then
+            echo "ERROR: WMIO_URL is not configured."
+            exit 1
+          fi
+
+          if [ -z "${WMIO_USER:-}" ]; then
+            echo "ERROR: WMIO_USER is not configured."
+            exit 1
+          fi
+
+          if [ -z "${WMIO_PASSWORD:-}" ]; then
+            echo "ERROR: WMIO_PASSWORD is not configured."
+            exit 1
+          fi
+
+          if [ -z "${WMIO_TOTP_SECRET:-}" ]; then
+            echo "ERROR: WMIO_TOTP_SECRET is not configured."
+            exit 1
+          fi
+
+          echo "WMIO_URL          : configured"
+          echo "WMIO_USER         : configured"
+          echo "WMIO_PASSWORD     : configured"
+          echo "WMIO_TOTP_SECRET  : configured"
+          echo "=========================================="
+
       - name: Run IBM SSO authentication
         run: npx ts-node global-setup.ts
         env:
@@ -114,6 +156,8 @@ jobs:
         if: success()
         shell: bash
         run: |
+          set -e
+
           if [ ! -f auth.json ]; then
             echo "ERROR: IBM SSO completed but auth.json was not created."
             echo "Check global-setup.ts and the SSO screenshots."
@@ -140,11 +184,12 @@ jobs:
           retention-days: 3
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# STAGE 2 — TEST SHARDS
-# N runners in parallel, each runs 1/N of scenarios
-# ─────────────────────────────────────────────────────────────────────────────
+  # ============================================================
+  # STAGE 2 — TEST SHARDS
+  # ============================================================
+
   test:
+
     name: '[${{ inputs.environment == ''preprod'' && ''MCSP AWS Preprod'' || inputs.environment == ''staging'' && ''MCSP AWS Staging'' || inputs.environment == ''prod'' && ''MCSP AWS Prod'' || ''MCSP AWS Preprod'' }}] 🧪 Shard ${{ matrix.shard }}/${{ inputs.shards || ''1'' }} — ${{ inputs.tag || ''@smoke'' }}'
 
     needs: auth
@@ -155,9 +200,29 @@ jobs:
 
     environment: ${{ inputs.environment || 'preprod' }}
 
+    # IMPORTANT:
+    #
+    # GitHub Actions jobs are isolated.
+    #
+    # The secrets provided to the auth job are NOT automatically
+    # available to this test job.
+    #
+    # auth creates auth.json.
+    # test downloads auth.json AND receives the environment variables
+    # required by the test code.
+
+    env:
+      WMIO_URL: ${{ secrets.WMIO_URL }}
+      WMIO_USER: ${{ secrets.WMIO_USER }}
+      WMIO_PASSWORD: ${{ secrets.WMIO_PASSWORD }}
+      WMIO_TOTP_SECRET: ${{ secrets.WMIO_TOTP_SECRET }}
+      WMIO_INSTANCE_API_KEY: ${{ secrets.WMIO_INSTANCE_API_KEY }}
+      APIGW_URL: ${{ secrets.APIGW_URL }}
+      PIVOT_MANUAL_TEST_URL: ${{ secrets.PIVOT_MANUAL_TEST_URL }}
+      PIVOT_MANUAL_TEST_PROJECT_ID: ${{ secrets.PIVOT_MANUAL_TEST_PROJECT_ID }}
+      HEADLESS: true
+
     strategy:
-      # Don't cancel other shards if one fails.
-      # We want the complete result from every shard.
       fail-fast: false
 
       matrix:
@@ -173,53 +238,54 @@ jobs:
 
     steps:
 
-      # ───────────────────────────────────────────────────────────────────────
+      # ----------------------------------------------------------
       # CHECKOUT
-      # ───────────────────────────────────────────────────────────────────────
+      # ----------------------------------------------------------
+
       - name: Checkout
         uses: actions/checkout@v4
 
-      # ───────────────────────────────────────────────────────────────────────
+      # ----------------------------------------------------------
       # NODE
-      # ───────────────────────────────────────────────────────────────────────
+      # ----------------------------------------------------------
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: "22"
 
-      # ───────────────────────────────────────────────────────────────────────
+      # ----------------------------------------------------------
       # DEPENDENCIES
-      # ───────────────────────────────────────────────────────────────────────
+      # ----------------------------------------------------------
+
       - name: Install dependencies
         run: npm install
 
-      # ───────────────────────────────────────────────────────────────────────
+      # ----------------------------------------------------------
       # PLAYWRIGHT
-      #
-      # Do NOT use --with-deps on this self-hosted runner.
-      # It previously attempted sudo and failed because the runner cannot
-      # provide a sudo password interactively.
-      # ───────────────────────────────────────────────────────────────────────
+      # ----------------------------------------------------------
+
       - name: Install Playwright Chromium
         run: npx playwright install chromium
 
-      # ───────────────────────────────────────────────────────────────────────
+      # ----------------------------------------------------------
       # AUTH STATE
-      #
-      # Stage 1 creates auth.json.
-      # Every test shard downloads the same authenticated browser state.
-      # ───────────────────────────────────────────────────────────────────────
+      # ----------------------------------------------------------
+
       - name: Download auth state
         uses: actions/download-artifact@v4
         with:
           name: auth-state
 
-      # ───────────────────────────────────────────────────────────────────────
+      # ----------------------------------------------------------
       # VERIFY AUTH STATE
-      # ───────────────────────────────────────────────────────────────────────
+      # ----------------------------------------------------------
+
       - name: Verify auth state
         shell: bash
         run: |
+          set -e
+
           if [ ! -f auth.json ]; then
             echo "ERROR: auth.json was not downloaded."
             echo "The authentication stage should have produced auth.json."
@@ -229,15 +295,55 @@ jobs:
           echo "Auth state available."
           echo "Size: $(wc -c < auth.json) bytes"
 
-      # ───────────────────────────────────────────────────────────────────────
+      # ----------------------------------------------------------
+      # VERIFY TEST ENVIRONMENT
+      # ----------------------------------------------------------
+
+      - name: Verify test environment
+        shell: bash
+        run: |
+          set -e
+
+          echo "=========================================="
+          echo "Test environment validation"
+          echo "=========================================="
+          echo "Environment: ${{ inputs.environment || 'preprod' }}"
+          echo ""
+
+          if [ -z "${WMIO_URL:-}" ]; then
+            echo "ERROR: WMIO_URL is not configured."
+            echo "Check the '${{ inputs.environment || 'preprod' }}' GitHub Environment."
+            exit 1
+          fi
+
+          if [ -z "${WMIO_USER:-}" ]; then
+            echo "ERROR: WMIO_USER is not configured."
+            echo "Check the '${{ inputs.environment || 'preprod' }}' GitHub Environment."
+            exit 1
+          fi
+
+          if [ -z "${WMIO_PASSWORD:-}" ]; then
+            echo "ERROR: WMIO_PASSWORD is not configured."
+            echo "Check the '${{ inputs.environment || 'preprod' }}' GitHub Environment."
+            exit 1
+          fi
+
+          echo "WMIO_URL       : configured"
+          echo "WMIO_USER      : configured"
+          echo "WMIO_PASSWORD  : configured"
+          echo "=========================================="
+
+      # ----------------------------------------------------------
       # GENERATE BDD
-      # ───────────────────────────────────────────────────────────────────────
+      # ----------------------------------------------------------
+
       - name: Generate BDD specs
         run: npx bddgen
 
-      # ───────────────────────────────────────────────────────────────────────
+      # ----------------------------------------------------------
       # RUN TESTS
-      # ───────────────────────────────────────────────────────────────────────
+      # ----------------------------------------------------------
+
       - name: Run tests (shard ${{ matrix.shard }}/${{ inputs.shards || '1' }})
         shell: bash
         run: |
@@ -255,31 +361,40 @@ jobs:
           echo "Suite       : $SUITE"
           echo "Tag         : $TAG"
           echo "Shard       : $SHARD_INDEX/$SHARD_TOTAL"
+          echo "WMIO_URL    : configured"
           echo "=========================================="
           echo ""
 
           if [ "$SUITE" = "bdd" ]; then
 
             if [ "$SHARD_TOTAL" = "1" ]; then
+
               npx playwright test \
                 --project=bdd \
                 --grep="$TAG"
+
             else
+
               npx playwright test \
                 --project=bdd \
                 --grep="$TAG" \
                 --shard="$SHARD_INDEX/$SHARD_TOTAL"
+
             fi
 
           elif [ "$SUITE" = "specs" ]; then
 
             if [ "$SHARD_TOTAL" = "1" ]; then
+
               npx playwright test \
                 --project=chromium
+
             else
+
               npx playwright test \
                 --project=chromium \
                 --shard="$SHARD_INDEX/$SHARD_TOTAL"
+
             fi
 
           elif [ "$SUITE" = "all" ]; then
@@ -290,14 +405,18 @@ jobs:
             set +e
 
             if [ "$SHARD_TOTAL" = "1" ]; then
+
               npx playwright test \
                 --project=bdd \
                 --grep="$TAG"
+
             else
+
               npx playwright test \
                 --project=bdd \
                 --grep="$TAG" \
                 --shard="$SHARD_INDEX/$SHARD_TOTAL"
+
             fi
 
             BDD_EXIT=$?
@@ -305,16 +424,21 @@ jobs:
             echo ""
             echo "BDD exit code: $BDD_EXIT"
             echo ""
+
             echo "Running Playwright spec tests..."
             echo ""
 
             if [ "$SHARD_TOTAL" = "1" ]; then
+
               npx playwright test \
                 --project=chromium
+
             else
+
               npx playwright test \
                 --project=chromium \
                 --shard="$SHARD_INDEX/$SHARD_TOTAL"
+
             fi
 
             SPECS_EXIT=$?
@@ -339,9 +463,10 @@ jobs:
 
           fi
 
-      # ───────────────────────────────────────────────────────────────────────
+      # ----------------------------------------------------------
       # MONOCART
-      # ───────────────────────────────────────────────────────────────────────
+      # ----------------------------------------------------------
+
       - name: Inspect Monocart output
         if: always()
         shell: bash
@@ -366,9 +491,10 @@ jobs:
           path: monocart-report/
           retention-days: 1
 
-      # ───────────────────────────────────────────────────────────────────────
+      # ----------------------------------------------------------
       # TEST RESULTS
-      # ───────────────────────────────────────────────────────────────────────
+      # ----------------------------------------------------------
+
       - name: Upload test results (shard ${{ matrix.shard }})
         uses: actions/upload-artifact@v4
         if: always() && hashFiles('test-results/**') != ''
@@ -377,9 +503,10 @@ jobs:
           path: test-results/
           retention-days: 7
 
-      # ───────────────────────────────────────────────────────────────────────
+      # ----------------------------------------------------------
       # PLAYWRIGHT HTML REPORT
-      # ───────────────────────────────────────────────────────────────────────
+      # ----------------------------------------------------------
+
       - name: Upload Playwright HTML report (shard ${{ matrix.shard }})
         uses: actions/upload-artifact@v4
         if: always() && hashFiles('playwright-report/**') != ''
@@ -387,6 +514,7 @@ jobs:
           name: playwright-report-shard-${{ matrix.shard }}
           path: playwright-report/
           retention-days: 7
+
 
   # ============================================================
   # REPORT
