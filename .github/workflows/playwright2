@@ -1,0 +1,579 @@
+name: Pivot E2E Test Cycle
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Target environment"
+        required: true
+        default: "preprod"
+        type: choice
+        options:
+          - preprod
+          - staging
+          - prod
+
+      tag:
+        description: "BDD tag to run"
+        required: true
+        default: "@e2e"
+        type: choice
+        options:
+          - "@e2e"
+          - "@smoke"
+          - "@ui"
+          - "@api"
+          - "@workflow"
+          - "@apigw"
+          - "@cleanup"
+          - "@monitoring"
+          - "@flowservice"
+          - "@hitApi"
+          - "@createApi"
+          - "@dashboard"
+
+      shards:
+        description: "Number of parallel shards"
+        required: true
+        default: "1"
+        type: choice
+        options:
+          - "1"
+          - "3"
+          - "5"
+          - "10"
+
+      suite:
+        description: "Test suite to run"
+        required: true
+        default: "bdd"
+        type: choice
+        options:
+          - bdd
+          - specs
+          - all
+
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "tests/**"
+      - "pages/**"
+      - "step-definitions/**"
+      - "utils/**"
+      - "helpers/**"
+
+concurrency:
+  group: pivot-${{ inputs.environment || 'preprod' }}-${{ inputs.tag || '@e2e' }}
+  cancel-in-progress: true
+
+jobs:
+
+  # ============================================================
+  # AUTH
+  # ============================================================
+
+  auth:
+
+    name: >
+      [${{
+        inputs.environment == 'preprod' && 'MCSP AWS Preprod' ||
+        inputs.environment == 'staging' && 'MCSP AWS Staging' ||
+        inputs.environment == 'prod' && 'MCSP AWS Prod' ||
+        'MCSP AWS Preprod'
+      }}] Auth
+
+    runs-on: self-hosted
+
+    timeout-minutes: 15
+
+    environment: ${{ inputs.environment || 'preprod' }}
+
+    steps:
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install dependencies
+        run: npm install
+
+      # IMPORTANT:
+      # Do NOT use --with-deps on the current self-hosted runner.
+      # It attempts sudo and requires an interactive password.
+      - name: Install Playwright Chromium
+        run: npx playwright install chromium
+
+      - name: Verify Playwright installation
+        run: npx playwright --version
+
+      # Authentication is done explicitly here.
+      # Playwright globalSetup is disabled in playwright.config.ts
+      # so authentication is NOT performed twice.
+      - name: Run IBM SSO authentication
+        run: npx ts-node global-setup.ts
+        env:
+          WMIO_URL: ${{ secrets.WMIO_URL }}
+          WMIO_USER: ${{ secrets.WMIO_USER }}
+          WMIO_PASSWORD: ${{ secrets.WMIO_PASSWORD }}
+          WMIO_TOTP_SECRET: ${{ secrets.WMIO_TOTP_SECRET }}
+          WMIO_INSTANCE_API_KEY: ${{ secrets.WMIO_INSTANCE_API_KEY }}
+
+          APIGW_URL: ${{ secrets.APIGW_URL }}
+
+          PIVOT_MANUAL_TEST_URL: ${{ secrets.PIVOT_MANUAL_TEST_URL }}
+          PIVOT_MANUAL_TEST_PROJECT_ID: ${{ secrets.PIVOT_MANUAL_TEST_PROJECT_ID }}
+
+          HEADLESS: false
+
+      # Diagnostic only.
+      # If authentication failed, this step does not create another failure.
+      - name: Upload auth state
+        if: always() && hashFiles("auth.json") != ""
+        uses: actions/upload-artifact@v4
+        with:
+          name: auth-state
+          path: auth.json
+          retention-days: 1
+
+      # Diagnostic only.
+      - name: Upload SSO screenshots
+        if: always() && hashFiles("screenshots/*.png") != ""
+        uses: actions/upload-artifact@v4
+        with:
+          name: sso-screenshots
+          path: screenshots/*.png
+          retention-days: 3
+
+      # Only validate auth.json if the SSO command itself succeeded.
+      - name: Verify auth state
+        if: success()
+        run: |
+          if [ ! -f auth.json ]; then
+            echo "ERROR: IBM SSO completed but auth.json was not created."
+            echo "Check global-setup.ts and the SSO screenshots."
+            exit 1
+          fi
+
+          echo "Auth state created successfully."
+          echo "Size: $(wc -c < auth.json) bytes"
+
+
+  # ============================================================
+  # TESTS
+  # ============================================================
+
+  test:
+
+    name: >
+      [${{
+        inputs.environment == 'preprod' && 'MCSP AWS Preprod' ||
+        inputs.environment == 'staging' && 'MCSP AWS Staging' ||
+        inputs.environment == 'prod' && 'MCSP AWS Prod' ||
+        'MCSP AWS Preprod'
+      }}]
+      Shard ${{ matrix.shard }}/${{ inputs.shards || '1' }}
+      - ${{ inputs.tag || '@e2e' }}
+
+    needs: auth
+
+    runs-on: self-hosted
+
+    timeout-minutes: 90
+
+    strategy:
+      fail-fast: false
+
+      matrix:
+        shard: ${{ fromJson(
+          inputs.shards == '10' && '[1,2,3,4,5,6,7,8,9,10]' ||
+          inputs.shards == '5' && '[1,2,3,4,5]' ||
+          inputs.shards == '3' && '[1,2,3]' ||
+          '[1]'
+        ) }}
+
+    environment: ${{ inputs.environment || 'preprod' }}
+
+    steps:
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Install Playwright Chromium
+        run: npx playwright install chromium
+
+      - name: Verify Playwright installation
+        run: npx playwright --version
+
+      - name: Download auth state
+        uses: actions/download-artifact@v4
+        with:
+          name: auth-state
+
+      - name: Verify auth state
+        run: |
+          if [ ! -f auth.json ]; then
+            echo "ERROR: auth.json is missing."
+            echo "The authentication stage should have produced this file."
+            exit 1
+          fi
+
+          echo "Auth state available."
+          echo "Size: $(wc -c < auth.json) bytes"
+
+      - name: Generate BDD specs
+        run: npx bddgen
+
+      - name: Run tests
+        id: tests
+        shell: bash
+        run: |
+          set +e
+
+          SHARD_TOTAL="${{ inputs.shards || '1' }}"
+          SHARD_INDEX="${{ matrix.shard }}"
+          TAG="${{ inputs.tag || '@e2e' }}"
+          SUITE="${{ inputs.suite || 'bdd' }}"
+
+          echo "=========================================="
+          echo "Pivot E2E Test Cycle"
+          echo "=========================================="
+          echo "Environment : ${{ inputs.environment || 'preprod' }}"
+          echo "Suite       : $SUITE"
+          echo "Tag         : $TAG"
+          echo "Shard       : $SHARD_INDEX/$SHARD_TOTAL"
+          echo "=========================================="
+
+          if [ "$SUITE" = "bdd" ]; then
+
+            if [ "$SHARD_TOTAL" = "1" ]; then
+              npx playwright test \
+                --project=bdd \
+                --grep="$TAG"
+            else
+              npx playwright test \
+                --project=bdd \
+                --grep="$TAG" \
+                --shard="$SHARD_INDEX/$SHARD_TOTAL"
+            fi
+
+          elif [ "$SUITE" = "specs" ]; then
+
+            if [ "$SHARD_TOTAL" = "1" ]; then
+              npx playwright test \
+                --project=chromium
+            else
+              npx playwright test \
+                --project=chromium \
+                --shard="$SHARD_INDEX/$SHARD_TOTAL"
+            fi
+
+          elif [ "$SUITE" = "all" ]; then
+
+            if [ "$SHARD_TOTAL" = "1" ]; then
+              npx playwright test \
+                --project=bdd \
+                --grep="$TAG"
+
+              BDD_EXIT=$?
+
+              npx playwright test \
+                --project=chromium
+
+              SPECS_EXIT=$?
+
+              if [ "$BDD_EXIT" -ne 0 ]; then
+                TEST_EXIT_CODE="$BDD_EXIT"
+              else
+                TEST_EXIT_CODE="$SPECS_EXIT"
+              fi
+
+            else
+
+              npx playwright test \
+                --project=bdd \
+                --grep="$TAG" \
+                --shard="$SHARD_INDEX/$SHARD_TOTAL"
+
+              BDD_EXIT=$?
+
+              npx playwright test \
+                --project=chromium \
+                --shard="$SHARD_INDEX/$SHARD_TOTAL"
+
+              SPECS_EXIT=$?
+
+              if [ "$BDD_EXIT" -ne 0 ]; then
+                TEST_EXIT_CODE="$BDD_EXIT"
+              else
+                TEST_EXIT_CODE="$SPECS_EXIT"
+              fi
+
+            fi
+
+          else
+            echo "ERROR: Unknown suite: $SUITE"
+            TEST_EXIT_CODE=1
+          fi
+
+          if [ -z "${TEST_EXIT_CODE:-}" ]; then
+            TEST_EXIT_CODE=$?
+          fi
+
+          echo "test_exit_code=$TEST_EXIT_CODE" >> "$GITHUB_OUTPUT"
+
+          echo ""
+          echo "=========================================="
+
+          if [ "$TEST_EXIT_CODE" -eq 0 ]; then
+            echo "Tests passed."
+          else
+            echo "Tests failed with exit code $TEST_EXIT_CODE."
+          fi
+
+          echo "=========================================="
+
+          # Do not fail yet.
+          # Reports and diagnostics must be uploaded first.
+          exit 0
+
+        env:
+          CI: true
+          HEADLESS: true
+
+          WMIO_URL: ${{ secrets.WMIO_URL }}
+          WMIO_USER: ${{ secrets.WMIO_USER }}
+          WMIO_PASSWORD: ${{ secrets.WMIO_PASSWORD }}
+          WMIO_TOTP_SECRET: ${{ secrets.WMIO_TOTP_SECRET }}
+          WMIO_INSTANCE_API_KEY: ${{ secrets.WMIO_INSTANCE_API_KEY }}
+
+          APIGW_URL: ${{ secrets.APIGW_URL }}
+          E2EMON_URL: ${{ secrets.E2EMON_URL }}
+
+          PIVOT_MANUAL_TEST_URL: ${{ secrets.PIVOT_MANUAL_TEST_URL }}
+          PIVOT_MANUAL_TEST_PROJECT_ID: ${{ secrets.PIVOT_MANUAL_TEST_PROJECT_ID }}
+
+      # Diagnostic/artifact steps may run after test failure.
+      # They do NOT represent new test failures.
+      - name: Inspect Monocart output
+        if: always()
+        run: |
+          echo "=========================================="
+          echo "Monocart output"
+          echo "=========================================="
+
+          if [ -d monocart-report ]; then
+            find monocart-report -type f -print | sort
+          else
+            echo "No monocart-report directory was created."
+          fi
+
+          echo "=========================================="
+
+      - name: Upload Monocart report
+        if: always() && hashFiles("monocart-report/**") != ""
+        uses: actions/upload-artifact@v4
+        with:
+          name: monocart-report-shard-${{ matrix.shard }}
+          path: monocart-report/
+          retention-days: 1
+
+      - name: Upload test results
+        if: always() && hashFiles("test-results/**") != ""
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-shard-${{ matrix.shard }}
+          path: test-results/
+          retention-days: 7
+
+      - name: Upload Playwright report
+        if: always() && hashFiles("playwright-report/**") != ""
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-shard-${{ matrix.shard }}
+          path: playwright-report/
+          retention-days: 7
+
+      - name: Fail shard if tests failed
+        if: always()
+        shell: bash
+        run: |
+          TEST_EXIT_CODE="${{ steps.tests.outputs.test_exit_code }}"
+
+          if [ -z "$TEST_EXIT_CODE" ]; then
+            echo "ERROR: Test execution did not produce an exit code."
+            exit 1
+          fi
+
+          if [ "$TEST_EXIT_CODE" -ne 0 ]; then
+            echo "Tests failed with exit code $TEST_EXIT_CODE."
+            exit "$TEST_EXIT_CODE"
+          fi
+
+          echo "Shard passed."
+
+
+  # ============================================================
+  # REPORT
+  # ============================================================
+
+  report:
+
+    name: >
+      [${{
+        inputs.environment == 'preprod' && 'MCSP AWS Preprod' ||
+        inputs.environment == 'staging' && 'MCSP AWS Staging' ||
+        inputs.environment == 'prod' && 'MCSP AWS Prod' ||
+        'MCSP AWS Preprod'
+      }}] Merge Reports
+
+    needs: test
+
+    runs-on: self-hosted
+
+    timeout-minutes: 20
+
+    # Run report generation only when the test matrix actually ran.
+    # If auth failed, the test job is skipped and this job is skipped too.
+    if: >
+      always() &&
+      (
+        needs.test.result == 'success' ||
+        needs.test.result == 'failure'
+      )
+
+    permissions:
+      contents: write
+
+    environment: ${{ inputs.environment || 'preprod' }}
+
+    steps:
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Download Monocart shard reports
+        uses: actions/download-artifact@v4
+        with:
+          pattern: monocart-report-shard-*
+          path: monocart-shards/
+          merge-multiple: false
+
+      - name: Inspect downloaded Monocart reports
+        if: always()
+        run: |
+          echo "=========================================="
+          echo "Downloaded Monocart files"
+          echo "=========================================="
+
+          if [ -d monocart-shards ]; then
+            find monocart-shards -type f -print | sort
+          else
+            echo "No Monocart shard directory found."
+          fi
+
+          echo "=========================================="
+
+      - name: Merge Monocart reports
+        shell: bash
+        run: |
+          set -e
+
+          mkdir -p monocart-report
+
+          mapfile -t REPORT_FILES < <(
+            find monocart-shards \
+              -type f \
+              -name "index.json" \
+              -print | sort
+          )
+
+          echo "Found ${#REPORT_FILES[@]} Monocart JSON file(s)."
+
+          if [ "${#REPORT_FILES[@]}" -eq 0 ]; then
+            echo ""
+            echo "ERROR: No Monocart index.json files were found."
+            echo ""
+            echo "Downloaded files:"
+            find monocart-shards -type f -print | sort || true
+            echo ""
+            echo "Verify that playwright.config.ts has json: true"
+            echo "in the monocart-reporter configuration."
+            exit 1
+          fi
+
+          echo ""
+          echo "Monocart files being merged:"
+          printf '  %s\n' "${REPORT_FILES[@]}"
+          echo ""
+
+          npx monocart merge \
+            "${REPORT_FILES[@]}" \
+            --name "Pivot Test Report - ${{ inputs.environment || 'preprod' }} #${{ github.run_number }}" \
+            --outputFile monocart-report/index.html
+
+      - name: Verify Monocart report
+        run: |
+          if [ ! -f monocart-report/index.html ]; then
+            echo "ERROR: Monocart report was not generated."
+            exit 1
+          fi
+
+          echo "Monocart report generated successfully."
+          echo "Size: $(wc -c < monocart-report/index.html) bytes"
+
+      - name: Upload final Monocart report
+        if: always() && hashFiles("monocart-report/**") != ""
+        uses: actions/upload-artifact@v4
+        with:
+          name: monocart-report-${{ inputs.environment || 'preprod' }}-run${{ github.run_number }}
+          path: monocart-report/
+          retention-days: 30
+
+      - name: Deploy Monocart report to GitHub Pages
+        if: success() && hashFiles("monocart-report/index.html") != ""
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./monocart-report
+          destination_dir: ${{ inputs.environment || 'preprod' }}
+
+      - name: Write job summary
+        if: always()
+        run: |
+          echo "## Pivot E2E Test Cycle" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+
+          echo "| Field | Value |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|---|---|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Environment | \`${{ inputs.environment || 'preprod' }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Tag | \`${{ inputs.tag || '@e2e' }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Suite | \`${{ inputs.suite || 'bdd' }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Shards | \`${{ inputs.shards || '1' }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Run | #${{ github.run_number }} |" >> "$GITHUB_STEP_SUMMARY"
+
+          if [ -f monocart-report/index.html ]; then
+            echo "| Monocart Report | Generated successfully |" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "| Monocart Report | Not generated |" >> "$GITHUB_STEP_SUMMARY"
+          fi
