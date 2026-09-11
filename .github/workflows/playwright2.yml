@@ -140,7 +140,7 @@ jobs:
           retention-days: 3
 
 
-  # ─────────────────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
 # STAGE 2 — TEST SHARDS
 # N runners in parallel, each runs 1/N of scenarios
 # ─────────────────────────────────────────────────────────────────────────────
@@ -156,10 +156,8 @@ jobs:
     environment: ${{ inputs.environment || 'preprod' }}
 
     strategy:
-      /*
-       * Don't cancel other shards if one fails.
-       * We want the complete result from every shard.
-       */
+      # Don't cancel other shards if one fails.
+      # We want the complete result from every shard.
       fail-fast: false
 
       matrix:
@@ -171,7 +169,7 @@ jobs:
             || inputs.shards == '3'
             && '[1,2,3]'
             || '[1]'
-        ) }}
+         ) }}
 
     steps:
 
@@ -181,7 +179,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-
       # ───────────────────────────────────────────────────────────────────────
       # NODE
       # ───────────────────────────────────────────────────────────────────────
@@ -190,39 +187,32 @@ jobs:
         with:
           node-version: '22'
 
-
       # ───────────────────────────────────────────────────────────────────────
       # DEPENDENCIES
       # ───────────────────────────────────────────────────────────────────────
       - name: Install dependencies
         run: npm install
 
-
       # ───────────────────────────────────────────────────────────────────────
       # PLAYWRIGHT
       #
-      # IMPORTANT:
       # Do NOT use --with-deps on this self-hosted runner.
-      #
-      # The runner previously failed because Playwright attempted sudo
-      # and the runner cannot provide a sudo password interactively.
+      # It previously attempted sudo and failed because the runner cannot
+      # provide a sudo password interactively.
       # ───────────────────────────────────────────────────────────────────────
       - name: Install Playwright Chromium
         run: npx playwright install chromium
 
-
       # ───────────────────────────────────────────────────────────────────────
       # AUTH STATE
       #
-      # Stage 1 already authenticated with IBM SSO and created auth.json.
-      # Every test shard downloads that exact same auth state.
-      # No login is performed again in Stage 2.
+      # Stage 1 creates auth.json.
+      # Every test shard downloads the same authenticated browser state.
       # ───────────────────────────────────────────────────────────────────────
       - name: Download auth state
         uses: actions/download-artifact@v4
         with:
           name: auth-state
-
 
       # ───────────────────────────────────────────────────────────────────────
       # VERIFY AUTH STATE
@@ -239,13 +229,11 @@ jobs:
           echo "Auth state available."
           echo "Size: $(wc -c < auth.json) bytes"
 
-
       # ───────────────────────────────────────────────────────────────────────
       # GENERATE BDD
       # ───────────────────────────────────────────────────────────────────────
       - name: Generate BDD specs
         run: npx bddgen
-
 
       # ───────────────────────────────────────────────────────────────────────
       # RUN TESTS
@@ -299,6 +287,8 @@ jobs:
             echo "Running BDD tests..."
             echo ""
 
+            set +e
+
             if [ "$SHARD_TOTAL" = "1" ]; then
               npx playwright test \
                 --project=bdd \
@@ -328,6 +318,8 @@ jobs:
             fi
 
             SPECS_EXIT=$?
+
+            set -e
 
             echo ""
             echo "Spec exit code: $SPECS_EXIT"
@@ -366,7 +358,6 @@ jobs:
 
           echo "=========================================="
 
-
       - name: Upload Monocart report (shard ${{ matrix.shard }})
         uses: actions/upload-artifact@v4
         if: always() && hashFiles('monocart-report/**') != ''
@@ -374,7 +365,6 @@ jobs:
           name: monocart-report-shard-${{ matrix.shard }}
           path: monocart-report/
           retention-days: 1
-
 
       # ───────────────────────────────────────────────────────────────────────
       # TEST RESULTS
@@ -386,7 +376,6 @@ jobs:
           name: test-results-shard-${{ matrix.shard }}
           path: test-results/
           retention-days: 7
-
 
       # ───────────────────────────────────────────────────────────────────────
       # PLAYWRIGHT HTML REPORT
